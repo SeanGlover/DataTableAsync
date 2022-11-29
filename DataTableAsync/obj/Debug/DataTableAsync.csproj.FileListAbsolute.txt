@@ -1,0 +1,9 @@
+C:\Users\SeanGlover\source\repos\DataTableAsync\DataTableAsync\bin\Debug\DataTableAsync.dll
+C:\Users\SeanGlover\source\repos\DataTableAsync\DataTableAsync\bin\Debug\DataTableAsync.pdb
+C:\Users\SeanGlover\source\repos\DataTableAsync\DataTableAsync\bin\Debug\Newtonsoft.Json.dll
+C:\Users\SeanGlover\source\repos\DataTableAsync\DataTableAsync\bin\Debug\Newtonsoft.Json.xml
+C:\Users\SeanGlover\source\repos\DataTableAsync\DataTableAsync\obj\Debug\DataTableAsync.csproj.AssemblyReference.cache
+C:\Users\SeanGlover\source\repos\DataTableAsync\DataTableAsync\obj\Debug\DataTableAsync.csproj.CoreCompileInputs.cache
+C:\Users\SeanGlover\source\repos\DataTableAsync\DataTableAsync\obj\Debug\DataTableAsync.csproj.CopyComplete
+C:\Users\SeanGlover\source\repos\DataTableAsync\DataTableAsync\obj\Debug\DataTableAsync.dll
+C:\Users\SeanGlover\source\repos\DataTableAsync\DataTableAsync\obj\Debug\DataTableAsync.pdb
