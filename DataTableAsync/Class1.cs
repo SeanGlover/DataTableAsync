@@ -243,7 +243,8 @@ namespace DataTableAsync
                     Dictionary<string, Dictionary<int, string>> columnStrings = new Dictionary<string, Dictionary<int, string>>();
                     Dictionary<string, int> columnWidths = new Dictionary<string, int>();
                     Dictionary<string, string> columnAlignments = new Dictionary<string, string>();
-                    List<Type> lefts = new List<Type> { typeof(bool), typeof(byte), typeof(short), typeof(int), typeof(long), typeof(DateTime), typeof(Icon), typeof(Image) };
+                    List<Type> lefts = new List<Type> { typeof(string) };
+                    List<Type> centers = new List<Type> { typeof(bool), typeof(byte), typeof(short), typeof(int), typeof(long), typeof(DateTime), typeof(Icon), typeof(Image) };
                     List<Type> rights = new List<Type> { typeof(double), typeof(decimal) };
                     int columnIndex = 1;
                     const double testDec = 1.5;
@@ -254,14 +255,17 @@ namespace DataTableAsync
                         {
                             foreach (Column col in table.Columns.Values)
                             {
-                                var decConvert = SurroundClass.ChangeType(testDec, col.DataType);
+                                Type colType = col.DataType;
+                                var decConvert = SurroundClass.ChangeType(testDec, colType);
                                 bool colType_isDecimal = decConvert is testDec;
                                 bool colValues_areDecimal = colType_isDecimal;
                                 if (colType_isDecimal)
                                 {
-                                    Type colType = SurroundClass.GetDataType(col.Values.Values);
-                                    decConvert = SurroundClass.ChangeType(testDec, colType);
-                                    colValues_areDecimal = (double)decConvert == testDec;
+                                    Type colGetType = SurroundClass.GetDataType(col.Values.Values);
+                                    decConvert = SurroundClass.ChangeType(testDec, colGetType);
+                                    double.TryParse(decConvert.ToString(), out double dblConvert);
+                                    colValues_areDecimal = dblConvert == testDec;
+                                    if (!colValues_areDecimal) colType = colGetType;
                                 }
 
                                 Dictionary<int, string> strings = new Dictionary<int, string>();
@@ -270,10 +274,10 @@ namespace DataTableAsync
                                 foreach (Row row in table.Rows.Values)
                                 {
                                     object rowCell = row.Cells[col.Name];
-                                    var castCell = SurroundClass.ChangeType(rowCell, col.DataType);
+                                    var castCell = SurroundClass.ChangeType(rowCell, colType);
                                     string cellString;
                                     if (rowCell == DBNull.Value | rowCell == null) cellString = string.Empty;
-                                    else if (col.DataType == typeof(DateTime)) // Dates
+                                    else if (colType == typeof(DateTime)) // Dates
                                     {
                                         DateTime cellDate = (DateTime)castCell;
                                         if (cellDate.TimeOfDay.Ticks == 0)
@@ -285,7 +289,6 @@ namespace DataTableAsync
                                     {
                                         NumberFormatInfo nfi = new CultureInfo("en-US", false).NumberFormat;
                                         // Displays a value with the default separator (".")
-                                        if (col.Name.ToLowerInvariant() == "ccskey") Debugger.Break();
                                         bool testDouble = double.TryParse(rowCell.ToString(), out double doubleValue);
                                         cellString = doubleValue.ToString("N", nfi);
                                     }
@@ -303,7 +306,7 @@ namespace DataTableAsync
 
                                 columnWidths.Add(col.Name, Convert.ToInt32(Math.Ceiling(columnWidth + 6))); // padded 6
                                                                                                             // tr td:nth-child(2) {text-align: right;}
-                                string columnAlignment = $"tr td:nth-child({columnIndex})" + " {text-align: " + (lefts.Contains(col.DataType) ? "left" : rights.Contains(col.DataType) ? "right" : "center").ToString() + ";}";
+                                string columnAlignment = $"tr td:nth-child({columnIndex})" + " {text-align: " + (lefts.Contains(colType) ? "left" : rights.Contains(colType) ? "right" : "center").ToString() + ";}";
                                 columnAlignments.Add(col.Name, columnAlignment);
                                 columnIndex += 1;
                             }
