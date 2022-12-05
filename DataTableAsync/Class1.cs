@@ -639,6 +639,7 @@ namespace DataTableAsync
                     return reverseKeys.ContainsKey(this) ? reverseKeys[this] : -1;
                 }
             }
+            [JsonIgnore]
             public Dictionary<int, object> Values => Table.Rows.ToDictionary(k => k.Key, v => v.Value[Name]);
             public Column() { }
             public Column(string name, Type datatype)
