@@ -419,6 +419,7 @@ namespace DataTableAsync
                 foreach (var row in Rows) AddKeys(row);
             }
         }
+        [JsonIgnore]
         public Dictionary<dynamic, dynamic> Keys { get; } = new Dictionary<dynamic, dynamic>();
         internal Dictionary<byte, Column> primaryKeys = new Dictionary<byte, Column>();
         public Row FindRow(object findValue) => FindRow(new object[] { findValue });
