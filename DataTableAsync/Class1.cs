@@ -259,7 +259,7 @@ namespace DataTableAsync
                                 var decConvert = SurroundClass.ChangeType(testDec, colType);
                                 bool colType_isDecimal = decConvert is testDec;
                                 bool colValues_areDecimal = colType_isDecimal;
-                                if (colType_isDecimal)
+                                if (colType_isDecimal & col.Values.Any())
                                 {
                                     Type colGetType = SurroundClass.GetDataType(col.Values.Values);
                                     decConvert = SurroundClass.ChangeType(testDec, colGetType);
