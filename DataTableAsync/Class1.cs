@@ -111,16 +111,17 @@ namespace DataTableAsync
             if (sourceTable != null)
             {
                 primaryKey = primaryKey ?? string.Empty;
-                Dictionary<byte, Column> newKeys = new Dictionary<byte, Column>();
+                List<Column> newKeys = new List<Column>();
                 Dictionary<DataColumn, Column> cols = new Dictionary<DataColumn, Column>();
                 foreach (DataColumn column in sourceTable.Columns)
                 {
                     Column newColumn = new Column(column.ColumnName, column.DataType);
                     Columns.Add(column.ColumnName, newColumn);
                     cols.Add(column, newColumn);
+                    if (sourceTable.PrimaryKey.Contains(column) | column.ColumnName.ToLowerInvariant() == primaryKey)
+                        newKeys.Add(newColumn);
                 }
-                foreach (DataColumn column in sourceTable.PrimaryKey) newKeys.Add((byte)newKeys.Count, cols[column]);
-
+                PrimaryKeys = newKeys.ToArray();
                 int rowIndex = 0;
                 foreach (DataRow row in sourceTable.AsEnumerable()) Rows.Add(rowIndex++, new Row(row.ItemArray, this));
             }
@@ -152,9 +153,14 @@ namespace DataTableAsync
         {
             string tableName = Name;
             Table replica = new Table() { Name = tableName };
+            List<Column> primarykeys = new List<Column>();
             foreach (Column column in Columns.Values)
-                replica.Columns.Add(new Column() { Name = column.Name, DataType = column.DataType, DefaultValue = column.DefaultValue });
-            replica.PrimaryKeys = PrimaryKeys;
+            {
+                Column replicaColumn = new Column() { Name = column.Name, DataType = column.DataType, DefaultValue = column.DefaultValue };
+                replica.Columns.Add(replicaColumn);
+                if (column.IsKey) primarykeys.Add(replicaColumn);
+            }
+            replica.PrimaryKeys = primarykeys.ToArray();
             return replica;
         }
         public void Merge(Table mergeTable)
