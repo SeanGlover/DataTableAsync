@@ -413,7 +413,6 @@ namespace DataTableAsync
         [JsonIgnore]
         public string Json => JsonConvert.SerializeObject(this, Formatting.None);
         [JsonIgnore]
-
         public Column[] PrimaryKeys
         {
             get => primaryKeys.OrderBy(pk => pk.Key).Select(pk => pk.Value).ToArray();
@@ -514,6 +513,11 @@ namespace DataTableAsync
                 Table.Columns.Add(columnName, addColumn);
                 return Table.Columns[addColumn.Name];
             }
+            public List<Column> AddRange(Column[] columns)
+            {
+                foreach (Column col in columns) Add(col);
+                return new List<Column>(columns);
+            }
             public new TKey Remove(TKey key)
             {
                 if (key != null)
@@ -546,7 +550,12 @@ namespace DataTableAsync
             }
             public new TValue this[TKey key]
             {
-                get { return base[key]; }
+                get
+                {
+                    if (ContainsKey(key)) return base[key];
+                    else
+                        throw new Exception($"{key} key not found");
+                }
                 set { base[key] = value; }
             }
             public TValue this[int index]
@@ -764,7 +773,11 @@ namespace DataTableAsync
                 }
             }
             internal int index;
-            public object this[string key] => Cells[key];
+            public object this[string key]
+            {
+                get { return Cells[key]; }
+                set { Cells[key] = value; }
+            }
             public CellCollection<string, object> Cells;
             public Row() => Cells = new CellCollection<string, object>(this);
             public Row(IEnumerable values)
@@ -833,7 +846,12 @@ namespace DataTableAsync
                 }
                 public new TValue this[TKey key]
                 {
-                    get { return ContainsKey(key) ? base[key] : default; }
+                    get
+                    {
+                        if (ContainsKey(key)) return base[key];
+                        else
+                            throw new Exception($"{key} key not found");
+                    }
                     set
                     {
                         if (key != null)
@@ -851,6 +869,10 @@ namespace DataTableAsync
                                         base[key] = value;
                                     }
                                 }
+                            }
+                            else
+                            {
+                                throw new Exception($"{key} key not found");
                             }
                         }
                     }
