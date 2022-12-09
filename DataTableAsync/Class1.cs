@@ -656,7 +656,7 @@ namespace DataTableAsync
                 }
             }
             [JsonIgnore]
-            public Dictionary<int, object> Values => Table.Rows.ToDictionary(k => k.Key, v => v.Value[Name]);
+            public Dictionary<int, object> Values => Table == null ? new Dictionary<int, object>() : Table.Rows.ToDictionary(k => k.Key, v => v.Value[Name]);
             public Column() { }
             public Column(string name, Type datatype)
             {
