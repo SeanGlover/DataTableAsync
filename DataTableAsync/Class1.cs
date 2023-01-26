@@ -11,7 +11,6 @@ using System.Threading.Tasks;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using static DataTableAsync.Table;
-using System.Diagnostics;
 
 namespace DataTableAsync
 {
@@ -57,7 +56,6 @@ namespace DataTableAsync
                     Columns.Add(colType.Key, colType.Value);
                 foreach (var row in rows.OrderBy(r => r.Key))
                     Rows.Add(row.Value.Values);
-                //Debugger.Break();
             }
         }
         public Table(string filepath)
