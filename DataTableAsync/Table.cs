@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using static DataTableAsync.Table;
+using System.Diagnostics;
 
 namespace DataTableAsync
 {
@@ -21,46 +22,51 @@ namespace DataTableAsync
     {
         internal const string bar = "|";
         #region" ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ E V E N T S "
-        protected virtual void OnColumnsChanged(EventType columnEvent, Column column) { ColumnsChanged?.Invoke(this, new TableEventArgs(columnEvent, column)); }
+        protected virtual void OnTableCleared(EventType tableEvent) => TableCleared?.Invoke(this, new TableEventArgs(tableEvent));
+        public event EventHandler<TableEventArgs> TableCleared;
+        protected virtual void OnColumnsChanged(EventType columnEvent, Column column) => ColumnsChanged?.Invoke(this, new TableEventArgs(columnEvent, column));
         public event EventHandler<TableEventArgs> ColumnsChanged;
-        protected virtual void OnColumnCastFailed(Column column, Type toType) { ColumnCastFailed?.Invoke(this, new TableEventArgs(column, toType)); }
-        public event EventHandler<TableEventArgs> ColumnCastFailed;
-        protected virtual void OnRowsChanged(EventType rowEvent, Row row) { RowsChanged?.Invoke(this, new TableEventArgs(rowEvent, row)); }
+
+        protected virtual void OnRowsChanged(EventType rowEvent, Row row) => RowsChanged?.Invoke(this, new TableEventArgs(rowEvent, row));
         public event EventHandler<TableEventArgs> RowsChanged;
-        protected virtual void OnCellChanged(Row row, Column column, object oldValue, object newValue)
-        {
-            CellChanged?.Invoke(this, new TableEventArgs(row, column, oldValue, newValue));
-        }
+        protected virtual void OnColumnCastFailed(Column column, Type toType) => ColumnCastFailed?.Invoke(this, new TableEventArgs(column, toType));
+        public event EventHandler<TableEventArgs> ColumnCastFailed;
+        protected virtual void OnCellChanged(Row row, Column column, object oldValue, object newValue) => CellChanged?.Invoke(this, new TableEventArgs(row, column, oldValue, newValue));
         public event EventHandler<TableEventArgs> CellChanged;
         #endregion
         //[JsonConverter(typeof(CustomConverter))]
         public string Name { get; set; }
         //[JsonConverter(typeof(CustomConverter))]
-        public virtual ColumnCollection<string, Column> Columns { get; private set; }
+        public virtual ColumnCollection<string, Column> Columns { get; }
         //[JsonConverter(typeof(CustomConverter))]
-        public virtual RowCollection<int, Row> Rows { get; private set; }
-        public Table() { InitCollections(); }
+        public virtual RowCollection<int, Row> Rows { get; }
+        public Table() { Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this); }
         public Table(Tuple<Dictionary<byte, string>, Dictionary<int, Dictionary<string, string>>> Db2Out)
         {
             if (Db2Out != null && Db2Out.Item1.Any())
             {
-                InitCollections();
+                Columns = new ColumnCollection<string, Column>(this);
+                Rows = new RowCollection<int, Row>(this);
+
                 Dictionary<byte, string> cols = Db2Out.Item1;
                 Dictionary<int, Dictionary<string, string>> rows = Db2Out.Item2;
-                var values = cols.ToDictionary(k => k.Value, v => new Dictionary<int, string>());
-                foreach (var row in rows)
+                var values = cols.ToDictionary(k => k.Value, v => new List<Type>());
+                foreach (var row in rows.Values)
                     foreach (var col in cols.Values)
-                        values[col].Add(row.Key, row.Value[col]);
-                Dictionary<string, Type> colTypes = values.ToDictionary(k => k.Key, v => SurroundClass.GetDataType(v.Value.Values));
-                foreach (var colType in colTypes)
-                    Columns.Add(colType.Key, colType.Value);
+                    {
+                        var stringValue = row[col];
+                        var valueType = SurroundClass.GetDataType(stringValue).Item1;
+                        values[col].Add(valueType);
+                    }
+                foreach (var colType in values)
+                    Columns.Add(colType.Key, SurroundClass.GetDataType(colType.Value));
                 foreach (var row in rows.OrderBy(r => r.Key))
                     Rows.Add(row.Value.Values);
             }
         }
         public Table(string filepath)
         {
-            InitCollections();
+            Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
             if (File.Exists(filepath ?? string.Empty)) Json_toTable(filepath);
             else
             {
@@ -69,18 +75,18 @@ namespace DataTableAsync
         }
         public Table(FileInfo jsonFile)
         {
-            InitCollections();
+            Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
             if (jsonFile.Exists) { Json_toTable(jsonFile.FullName); }
         }
         public Table(DataTable sourceTable, string primaryKey = null)
         {
             // the primarykey may have to be fed if the datatable is coming from a Db2 query
-            InitCollections();
+            Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
             DataTable_toTable(sourceTable, primaryKey);
         }
         public Table(IEnumerable dataSource)
         {
-            InitCollections();
+            Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
             Type tableType = dataSource.GetType();
             List<DataRow> datarows = new List<DataRow>(dataSource.OfType<DataRow>());
             if (datarows.Any()) DataTable_toTable(datarows.CopyToDataTable());
@@ -103,7 +109,17 @@ namespace DataTableAsync
                 }
             }
         }
-        private void InitCollections() { Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this); }
+        public Table(IEnumerable<Row> dataSource)
+        {
+            Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
+            List<Row> datarows = new List<Row>(dataSource.OfType<Row>());
+            if (datarows.Any()) {
+                List<Column> sourceColumns = new List<Column>(datarows.First().Table.Columns.Values);
+                foreach (Column column in sourceColumns) Columns.Add(column.Name, column.DataType);
+                foreach (Row row in datarows.OrderBy(r => r.Index)) Rows.Add(row);
+                if (Columns.Any()) PrimaryKeys = Columns.First().Value.Table?.PrimaryKeys;
+            }
+        }
         private void DataTable_toTable(DataTable sourceTable, string primaryKey = null)
         {
             if (sourceTable != null)
@@ -139,7 +155,11 @@ namespace DataTableAsync
             }
             else { }
         }
-        public void Clear() { Columns.Clear(); Rows.Clear(); }
+        public void Clear() {
+            Columns.Clear();
+            Rows.Clear();
+            OnTableCleared(EventType.TableCleared);
+        }
         public Table Copy()
         {
             Table replica = Clone();
@@ -169,11 +189,11 @@ namespace DataTableAsync
                         Columns.Add(new Column(column.Name, column.DataType) { DefaultValue = column.DefaultValue });
                 if (mergeTable.PrimaryKeys.Any()) PrimaryKeys = mergeTable.PrimaryKeys;
                 // mergeTable.Columns count>=this.Columns.Count
-                int columns_sameNameCount = 0;
+                int Columns_sameNameCount = 0;
                 foreach (Column column in mergeTable.Columns.Values)
-                    if (Columns.ContainsKey(column.Name)) columns_sameNameCount++;
+                    if (Columns.ContainsKey(column.Name)) Columns_sameNameCount++;
 
-                bool addByName = columns_sameNameCount >= Columns.Count;
+                bool addByName = Columns_sameNameCount >= Columns.Count;
                 bool addByIndex = !addByName;
                 if (addByName)
                 {
@@ -198,11 +218,11 @@ namespace DataTableAsync
                 // mergeTable.Columns count>=this.Columns.Count
                 // , mergeTable.PrimaryKey.Contains(column)
 
-                int columns_sameNameCount = 0;
+                int Columns_sameNameCount = 0;
                 foreach (DataColumn column in mergeTable.Columns)
-                    if (Columns.ContainsKey(column.ColumnName)) columns_sameNameCount++;
+                    if (Columns.ContainsKey(column.ColumnName)) Columns_sameNameCount++;
 
-                bool addByName = columns_sameNameCount >= Columns.Count;
+                bool addByName = Columns_sameNameCount >= Columns.Count;
                 bool addByIndex = !addByName;
                 if (addByName)
                 {
@@ -220,12 +240,41 @@ namespace DataTableAsync
         public DataTable CopyToDataTable()
         {
             DataTable copyTable = new DataTable() { TableName = Name };
-            foreach (Column column in Columns.Values) { copyTable.Columns.Add(new DataColumn(column.Name, column.DataType) { DefaultValue = column.DefaultValue }); }
-            foreach (Row row in Rows.Values) { copyTable.Rows.Add(row.Cells.Values.ToArray()); }
+            var primaryKeys = new List<Tuple<Column, DataColumn>>();
+            foreach (Column column in Columns.Values)
+            {
+                var newDataCol = new DataColumn(column.Name, column.DataType) { DefaultValue = column.DefaultValue };
+                copyTable.Columns.Add(newDataCol);
+                if (column.IsKey)
+                    primaryKeys.Add(Tuple.Create(column, newDataCol));
+            }
+            foreach (Row row in Rows.Values)
+            {
+                var itemArray = new List<object>();
+                foreach (var cell in row.Cells)
+                {
+                    try {
+                        var castCol = Columns[cell.Key];
+                        var colType = castCol.DataType;
+                        var castValue = SurroundClass.ChangeType(cell.Value, colType);
+                        itemArray.Add(castValue);
+                    }
+                    catch {
+                        itemArray.Add(null);
+                    }
+                }
+                try { copyTable.Rows.Add(itemArray.ToArray()); }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                    //Debugger.Break();
+                }
+            }
+            copyTable.PrimaryKey = primaryKeys.OrderBy(pk => pk.Item1.KeyIndex).Select(pk => pk.Item2).ToArray();
             return copyTable;
         }
         [JsonIgnore]
-        public List<Row> AsEnumerable { get { return new List<Row>(Rows.Values); } }
+        public List<Row> AsEnumerable => new List<Row>(Rows.Values);
         [JsonIgnore]
         public string HTML
         {
@@ -244,7 +293,7 @@ namespace DataTableAsync
                     Font headerFont = new Font(tableFont.FontFamily.Name, tableFont.Size + 1);
                     Dictionary<Row, List<string>> Rows = new Dictionary<Row, List<string>>();
 
-                    Dictionary<string, Dictionary<int, string>> columnStrings = new Dictionary<string, Dictionary<int, string>>();
+                    Dictionary<string, Dictionary<int, string>> Columnstrings = new Dictionary<string, Dictionary<int, string>>();
                     Dictionary<string, int> columnWidths = new Dictionary<string, int>();
                     Dictionary<string, string> columnAlignments = new Dictionary<string, string>();
                     List<Type> lefts = new List<Type> { typeof(string) };
@@ -265,7 +314,14 @@ namespace DataTableAsync
                                 bool colValues_areDecimal = colType_isDecimal;
                                 if (colType_isDecimal & col.Values.Any())
                                 {
-                                    Type colGetType = SurroundClass.GetDataType(col.Values.Values);
+                                    var colTypes = new List<Type>();
+                                    foreach (var colValue_kvp in col.Values)
+                                    {
+                                        var colValue = colValue_kvp.Value;
+                                        if (!(colValue == null | colValue == DBNull.Value))
+                                            colTypes.Add(SurroundClass.GetDataType(colValue.ToString()).Item1);
+                                    }
+                                    Type colGetType = SurroundClass.GetDataType(colTypes);
                                     decConvert = SurroundClass.ChangeType(testDec, colGetType);
                                     double.TryParse(decConvert.ToString(), out double dblConvert);
                                     colValues_areDecimal = dblConvert == testDec;
@@ -302,7 +358,7 @@ namespace DataTableAsync
                                     Rows[row].Add(cellString);
                                     rowIndex += 1;
                                 }
-                                columnStrings.Add(col.Name, strings);
+                                Columnstrings.Add(col.Name, strings);
 
                                 double columnHeadWidth = g.MeasureString(col.Name, headerFont).Width;
                                 double columnMaxContentWidth = strings.Values.Any() ? strings.Values.Select(c => g.MeasureString(c, tableFont).Width).Max() : 0;
@@ -376,17 +432,17 @@ namespace DataTableAsync
                 int rowIndexWidth = new int[] { Rows.Any() ? Rows.Keys.Max().ToString().Length : 0, "row".Length }.Max();
                 List<string> header = new List<string>(new string[] { $"row{new string(' ', rowIndexWidth - "row".Length)}" });
                 Dictionary<string, List<int>> columnWidths = new Dictionary<string, List<int>>();
-                Dictionary<string, Dictionary<int, string>> columnStrings = new Dictionary<string, Dictionary<int, string>>();
+                Dictionary<string, Dictionary<int, string>> Columnstrings = new Dictionary<string, Dictionary<int, string>>();
                 foreach (var col in Columns)
                 {
                     columnWidths.Add(col.Key, new List<int>());
                     columnWidths[col.Key].Add(col.Key.Length);
-                    columnStrings.Add(col.Key, new Dictionary<int, string>());
+                    Columnstrings.Add(col.Key, new Dictionary<int, string>());
                     foreach (var row in Rows)
                     {
                         object cellValue = row.Value.Cells[col.Key];
                         string cellString = cellValue == DBNull.Value || cellValue == null ? string.Empty : cellValue.ToString(); // dates always long form :(
-                        columnStrings[col.Key].Add(row.Key, cellString);
+                        Columnstrings[col.Key].Add(row.Key, cellString);
                         columnWidths[col.Key].Add(cellString.Length);
                     }
                     int colMaxWidth = columnWidths[col.Key].Max();
@@ -400,7 +456,7 @@ namespace DataTableAsync
                     foreach (var col in Columns)
                     {
                         int columnWidth = columnWidths[col.Key].Max();
-                        string cellString = columnStrings[col.Key][row.Key];
+                        string cellString = Columnstrings[col.Key][row.Key];
                         rowArray.Add($"{cellString}{new string(' ', columnWidth - cellString.Length)}");
                     }
                     rowLines.Add(string.Join(bar, rowArray));
@@ -417,9 +473,11 @@ namespace DataTableAsync
             set
             {
                 primaryKeys.Clear();
-                foreach (Column pk in value) primaryKeys.Add((byte)primaryKeys.Count, pk);
+                foreach (Column pk in value)
+                    primaryKeys.Add((byte)primaryKeys.Count, pk);
                 // setting keys AFTER rows are loaded
-                foreach (var row in Rows) AddKeys(row);
+                foreach (var row in Rows)
+                    AddKeys(row);
             }
         }
         [JsonIgnore]
@@ -467,22 +525,34 @@ namespace DataTableAsync
             foreach (Column col in PrimaryKeys)
             {
                 var castValue = SurroundClass.ChangeType(row.Value[col.Name], col.DataType);
+                if (castValue == null || castValue == DBNull.Value)
+                    throw new Exception($"Primary keys can not have a null value - column -> {col.Name}");
                 if (!tempDict.ContainsKey(castValue))
+                {
                     tempDict[castValue] = new Dictionary<dynamic, dynamic>();
+                    //Debugger.Break();
+                }
                 if (col.KeyIndex == (PrimaryKeys.Count() - 1))
+                {
                     tempDict[castValue] = row.Key;
-                else
+                    //Debugger.Break();
+                }
+                else {
                     tempDict = tempDict[castValue];
+                    //Debugger.Break();
+                }
             }
+            //Debugger.Break();
         }
+
         #region" ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ N E S T E D   C L A S S E S [ COLUMNS|ROWS] "
         [Serializable]
         public sealed class ColumnCollection<TKey, TValue> : Dictionary<TKey, TValue>
         {
             [JsonIgnore]
-            public Table Table { get; private set; }
-            public ColumnCollection(Table parent) : base(GetComparer()) { Table = parent; }
-            private static IEqualityComparer<TKey> GetComparer() => typeof(TKey) == typeof(string) ? (IEqualityComparer<TKey>)StringComparer.InvariantCultureIgnoreCase : EqualityComparer<TKey>.Default;
+            public Table Table { get; }
+            public ColumnCollection(Table parent) : base(GetComparer()) => Table = parent;
+            private static IEqualityComparer<TKey> GetComparer() => (IEqualityComparer<TKey>)StringComparer.InvariantCultureIgnoreCase;
             public new TValue Add(TKey key, TValue value)
             {
                 base.Add(key, value);
@@ -511,9 +581,10 @@ namespace DataTableAsync
                 Table.Columns.Add(columnName, addColumn);
                 return Table.Columns[addColumn.Name];
             }
-            public List<Column> AddRange(Column[] columns)
+            public List<Column> AddRange(IEnumerable<Column> columns)
             {
-                foreach (Column col in columns) Add(col);
+                foreach (Column col in columns)
+                    Add(col);
                 return new List<Column>(columns);
             }
             public new TKey Remove(TKey key)
@@ -542,9 +613,10 @@ namespace DataTableAsync
             public new void Clear()
             {
                 Table.primaryKeys.Clear();
-                foreach (Row row in Table.Rows.Values) { row.Cells.Clear(); }
-                Table.OnColumnsChanged(EventType.ColumnsCleared, null);
+                foreach (Row row in Table.Rows.Values)
+                    row.Cells.Clear();
                 base.Clear();
+                Table.OnColumnsChanged(EventType.ColumnsCleared, null);
             }
             public new TValue this[TKey key]
             {
@@ -588,7 +660,7 @@ namespace DataTableAsync
                             else
                             {
                                 bool cantParseAllValues = false;
-                                foreach (Row row in Table.Rows.Values) { if (!Wrap.Cast(value, row.Cells[Name])) { cantParseAllValues = true; break; } }
+                                foreach (Row row in Table.Rows.Values) { if (!SurroundClass.Cast(value, row.Cells[Name])) { cantParseAllValues = true; break; } }
                                 if (!cantParseAllValues) { datatype = value; }
                             }
                         }
@@ -603,7 +675,7 @@ namespace DataTableAsync
                 {
                     if (defaultValue != value)
                     {
-                        if (Wrap.Cast(DataType, value))
+                        if (SurroundClass.Cast(DataType, value))
                         {
                             defaultValue = value;
                             AwaitTask();
@@ -624,10 +696,10 @@ namespace DataTableAsync
             public string Name { get; set; }
             public int Index
             {
-                get { return index; }
+                get => index;
                 set
                 {
-                    if (index != value)
+                    if(index != value)
                     {
                         if (Table != null)
                         {
@@ -635,10 +707,24 @@ namespace DataTableAsync
                             List<int> ints = new List<int>(orderedCols.Select(c => c.Index));
                             ints.Remove(index);
                             ints.Insert(value, index);
-                            foreach (var col in orderedCols) Table.Columns[col.Name].index = ints.IndexOf(col.Index);
+                            foreach (var col in orderedCols)
+                                Table.Columns[col.Name].index = ints.IndexOf(col.Index);
+                            var rows = new List<object[]>();
+                            foreach (var row in Table.Rows.OrderBy(r => r.Key))
+                            {
+                                var cells = new List<object>();
+                                foreach (var cell in row.Value.Cells.OrderBy(c => Table.Columns[c.Key].Index))
+                                    cells.Add(cell.Value);
+                                rows.Add(cells.ToArray());
+                            }
+                            Table.Columns.Clear();
+                            Table.Rows.Clear();
+                            foreach (var col in orderedCols.OrderBy(c => c.Index))
+                                Table.Columns.Add(col.Name, col.DataType, col.DefaultValue);
+                            foreach (var row in rows)
+                                Table.Rows.Add(row);
                         }
                         index = value;
-                        if (parent != null) parent.Columns.OrderBy(c => c.Value.Index); // does nothing
                     }
                 }
             }
@@ -660,6 +746,12 @@ namespace DataTableAsync
             {
                 Name = name;
                 DataType = datatype;
+            }
+            public Column(string name, Type datatype, object defaultValue)
+            {
+                Name = name;
+                DataType = datatype;
+                DefaultValue = defaultValue;
             }
             public Row FindRow(dynamic findValue)
             {
@@ -685,7 +777,7 @@ namespace DataTableAsync
         {
             [JsonIgnore]
             public Table Table { get; private set; }
-            public RowCollection(Table parent) : base(GetComparer()) { Table = parent; }
+            public RowCollection(Table parent) : base(GetComparer()) => Table = parent;
             private static IEqualityComparer<TKey> GetComparer() => typeof(TKey) == typeof(string) ? (IEqualityComparer<TKey>)StringComparer.InvariantCultureIgnoreCase : EqualityComparer<TKey>.Default;
             public new TValue Add(TKey key, TValue value)
             {
@@ -726,15 +818,26 @@ namespace DataTableAsync
                 Table.OnRowsChanged(EventType.RowAdd, addRow);
                 return value;
             }
+            public Row Add()
+            {
+                Row emptyRow = new Row();
+                foreach (Column column in Table.Columns.Values)
+                    emptyRow.Cells.Add(column.Name, null);
+                    //emptyRow[column.Name] = null;
+                int rowIndex = Table.Rows.Count;
+                emptyRow.index = rowIndex;
+                Table.Rows.Add(rowIndex, emptyRow);
+                return Table.Rows[rowIndex];
+            }
             public Row Add(Row addRow)
             {
                 int rowIndex = Table.Rows.Count;
                 addRow.index = rowIndex;
-                Table.Rows.Add(rowIndex, addRow);
+                Table.Rows.Add(rowIndex, addRow);                
                 return Table.Rows[rowIndex];
             }
-            public Row Add(IEnumerable addValues) { return Add(new Row(addValues, Table)); }
-            public Row Add(object[] addValues) { return Add(new Row(addValues, Table)); }
+            public Row Add(IEnumerable addValues) => Add(new Row(addValues, Table));
+            public Row Add(object[] addValues) => Add(new Row(addValues, Table));
             public new TKey Remove(TKey key)
             {
                 if (key != null)
@@ -751,12 +854,12 @@ namespace DataTableAsync
             }
             public new void Clear()
             {
-                Table.OnRowsChanged(EventType.RowsCleared, null);
                 base.Clear();
+                Table.OnRowsChanged(EventType.RowsCleared, null);
             }
             public Row Find(dynamic value) => Table?.FindRow(value);
         }
-        public sealed class Row
+        public sealed class Row : IEquatable<Row>
         {
             [JsonIgnore]
             public Table Table { get { return parent; } }
@@ -776,6 +879,26 @@ namespace DataTableAsync
                 get { return Cells[key]; }
                 set { Cells[key] = value; }
             }
+            public object this[int index]
+            {
+                get {
+                    if (index < Table.Columns.Count)
+                    {
+                        var cols = Table.Columns.ToDictionary(k => k.Value.Index, v => v.Value.Name);
+                        return cols.ContainsKey(index) ? Cells[cols[index]] : null;
+                    }
+                    else
+                        return null;
+                }
+                set {
+                    if (index < Table.Columns.Count)
+                    {
+                        var cols = Table.Columns.ToDictionary(k => k.Value.Index, v => v.Value.Name);
+                        if (cols.ContainsKey(index))
+                            Cells[cols[index]] = value;
+                    }
+                }
+            }
             public CellCollection<string, object> Cells;
             public Row() => Cells = new CellCollection<string, object>(this);
             public Row(IEnumerable values)
@@ -792,26 +915,45 @@ namespace DataTableAsync
                 if (values != null)
                 {
                     this.parent = parent;
-                    Dictionary<int, object> Values = new Dictionary<int, object>();
+                    Dictionary<int, object> cellValues = new Dictionary<int, object>();
                     int valueIndex = 0;
-                    foreach (object cellValue in values) Values.Add(valueIndex++, cellValue);
+                    foreach (object cellValue in values)
+                        cellValues.Add(valueIndex++, cellValue);
                     int columnIndex = 0;
                     if (parent != null)
                     {
                         Dictionary<int, Column> cols = parent.Columns.Values.ToDictionary(k => k.Index, v => v);
-                        for (int colIndex = 0; colIndex < (new int[] { Values.Count, parent.Columns.Count }).Min(); colIndex++)
-                            Cells.Add(cols[colIndex].Name, Values[columnIndex++]);
+                        for (int colIndex = 0; colIndex < (new int[] { cellValues.Count, parent.Columns.Count }).Min(); colIndex++)
+                            Cells.Add(cols[colIndex].Name, cellValues[columnIndex++]);
                     }
                     else
                         foreach (object cellValue in values) Cells.Add($"→{columnIndex++}←", cellValue);
                 }
             }
+            [JsonIgnore]
+            public object[] Values => Cells.Values.ToArray();
             public override string ToString()
             {
                 string cellString = Cells.Any() ? string.Join(bar, Cells.Values.Select(c => (c ?? string.Empty).ToString())) : "[empty]";
                 return $"[{Index}] {cellString}";
             }
 
+            public bool Equals(Row other)
+            {
+                if (other is null) return false;
+                var bools = new List<bool>(Cells.Select(c => other.Cells.ContainsKey(c.Key) && other.Cells[c.Key] == c.Value));
+                bools.AddRange(other.Cells.Select(c => Cells.ContainsKey(c.Key) && Cells[c.Key] == c.Value));
+                return !bools.Any(b => !b);
+            }
+            public override int GetHashCode() {
+
+                int hash = 0;
+                foreach (var cellValue in Cells.Values) {
+                    if(cellValue != null)
+                        hash ^= cellValue.GetType() == typeof(string) ? ((string)cellValue ?? string.Empty).GetHashCode() : cellValue.GetHashCode();
+                }
+                return hash;
+            }
             [Serializable]
             public class CellCollection<TKey, TValue> : Dictionary<TKey, TValue>
             {
@@ -822,10 +964,10 @@ namespace DataTableAsync
                 public event EventHandler<TableEventArgs> CellChanged;
                 public Row Row { get; }
                 public CellCollection(Row parent) : base(GetComparer()) { Row = parent; }
-                private static IEqualityComparer<TKey> GetComparer()
-                {
-                    return typeof(TKey) == typeof(string) ? (IEqualityComparer<TKey>)StringComparer.InvariantCultureIgnoreCase : EqualityComparer<TKey>.Default;
-                }
+                private static IEqualityComparer<TKey> GetComparer() => (IEqualityComparer<TKey>)StringComparer.InvariantCultureIgnoreCase;
+                //{
+                //    return typeof(TKey) == typeof(string) ? (IEqualityComparer<TKey>)StringComparer.InvariantCultureIgnoreCase : EqualityComparer<TKey>.Default;
+                //}
 
                 public new TValue Add(TKey key, TValue value)
                 {
@@ -854,23 +996,18 @@ namespace DataTableAsync
                     {
                         if (key != null)
                         {
-                            if (ContainsKey(key))
+                            Table table = Row.Table;
+                            if (table != null)
                             {
-                                Table table = Row.Table;
-                                if (table != null)
+                                string columnName = key.ToString();
+                                if (table.Columns.ContainsKey(columnName))
                                 {
-                                    string columnName = key.ToString();
-                                    if (table.Columns.ContainsKey(columnName))
-                                    {
-                                        Column column = table.Columns[columnName];
-                                        table.OnCellChanged(Row, column, base[key], value);
-                                        base[key] = value;
-                                    }
+                                    Column column = table.Columns[columnName];
+                                    var fakeDict = new Dictionary<int, dynamic> { { 0, null } };
+                                    TValue oldValue = ContainsKey(key) ? base[key] : fakeDict[0];
+                                    table.OnCellChanged(Row, column, oldValue, value);
+                                    base[key] = value;
                                 }
-                            }
-                            else
-                            {
-                                throw new Exception($"{key} key not found");
                             }
                         }
                     }
@@ -879,24 +1016,24 @@ namespace DataTableAsync
         }
         #endregion
 
-        public override string ToString() { return $"Columns [{Columns.Count}] : Rows [{Rows.Count}] Name {Name ?? "None"}"; }
+        public override string ToString() => $"Columns [{Columns.Count}] : Rows [{Rows.Count}] Name {Name ?? "None"}";
     }
 
     #region " ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ S U P P O R T I N G   C L A S S E S ,  S T R U C T U R E S ,  E N U M S "
-    public enum EventType { none, RowsCleared, RowAdd, RowAddFail, RowRemove, CellChange, ColumnsCleared, ColumnAdd, ColumnCastFail, ColumnRemove }
+    public enum EventType { none, TableCleared, RowsCleared, RowAdd, RowAddFail, RowRemove, CellChange, ColumnsCleared, ColumnAdd, ColumnCastFail, ColumnRemove }
     public class TableEventArgs : EventArgs
     {
-        public Table.Column Column;
-        public Table.Row Row { get; }
+        public Column Column;
+        public Row Row { get; }
         public EventType TableAction { get; }
         public Type ProposedType { get; }
         public object CellValue { get; }
         public object ProposedCellValue { get; }
-        public TableEventArgs(EventType columnEvent, Table.Column column) { TableAction = columnEvent; Column = column; }
-        public TableEventArgs(Table.Column column, Type toType) { Column = column; ProposedType = toType; TableAction = EventType.ColumnCastFail; }
+        public TableEventArgs(EventType columnEvent, Column column) { TableAction = columnEvent; Column = column; }
+        public TableEventArgs(Column column, Type toType) { Column = column; ProposedType = toType; TableAction = EventType.ColumnCastFail; }
         public TableEventArgs(EventType rowEvent) { TableAction = rowEvent; }
-        public TableEventArgs(EventType rowEvent, Table.Row row) { TableAction = rowEvent; Row = row; }
-        public TableEventArgs(Table.Row row, Table.Column column, object oldValue, object newValue)
+        public TableEventArgs(EventType rowEvent, Row row) { TableAction = rowEvent; Row = row; }
+        public TableEventArgs(Row row, Column column, object oldValue, object newValue)
         {
             TableAction = EventType.CellChange;
             Row = row;
@@ -920,10 +1057,7 @@ namespace DataTableAsync
     }
     public class CustomConverter : JsonConverter
     {
-        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
-        {
-            throw new NotImplementedException("Not implemented yet");
-        }
+        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer) => throw new NotImplementedException("Not implemented yet");
         public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
         {
             if (reader.TokenType == JsonToken.Null) { return string.Empty; }
@@ -955,55 +1089,8 @@ namespace DataTableAsync
 
             }
         }
-        public override bool CanWrite
-        {
-            get { return false; }
-        }
-        public override bool CanConvert(Type objectType)
-        {
-            return false;
-        }
-    }
-    public static class Wrap
-    {
-        public static bool Cast(Type tryType, object value)
-        {
-            if (value == null) { return true; }
-            else if (tryType == typeof(char)) { return value.GetType() == typeof(char); }
-            else if (tryType == typeof(string)) { return value.GetType() == typeof(string); }
-            else if (tryType == typeof(Bitmap)) { return value.GetType() == typeof(System.Drawing.Image) | value.GetType() == typeof(Bitmap); }
-            else if (tryType == typeof(bool))
-            {
-                // something here with 0 | 1
-                return value.GetType() == typeof(bool) | new string[] { "true", "false" }.Contains(value.ToString().ToLowerInvariant());
-            }
-            else if (tryType == typeof(DateTime))
-            {
-                // something here with cultureinfo
-                return value.GetType() == typeof(DateTime);
-            }
-            else
-            {
-                string valueString = value.ToString().ToLowerInvariant();
-                if (valueString.All(char.IsNumber))
-                {
-                    if (tryType == typeof(double)) { return double.TryParse(valueString, out double result); }
-                    else if (tryType == typeof(decimal)) { return decimal.TryParse(valueString, out decimal result); }
-                    else if (tryType == typeof(long)) { return long.TryParse(valueString, out long result); }
-                    else if (tryType == typeof(ulong)) { return ulong.TryParse(valueString, out ulong result); }
-                    else if (tryType == typeof(int)) { return int.TryParse(valueString, out int result); }
-                    else if (tryType == typeof(float)) { return float.TryParse(valueString, out float result); }
-                    else if (tryType == typeof(short)) { return short.TryParse(valueString, out short result); }
-                    else if (tryType == typeof(ushort)) { return ushort.TryParse(valueString, out ushort result); }
-                    else if (tryType == typeof(sbyte)) { return sbyte.TryParse(valueString, out sbyte result); }
-                    else if (tryType == typeof(byte)) { return byte.TryParse(valueString, out byte result); }
-                    //else if (tryType == typeof(nuint)) { return nuint.TryParse(valueString, out nuint result); }
-                    //else if (tryType == typeof(nint)) { return nint.TryParse(valueString, out nint result); }
-                    else { return false; }
-                }
-                else { return false; }
-            }
-        }
+        public override bool CanWrite => false;
+        public override bool CanConvert(Type objectType) => false;
     }
     internal static class SurroundClass
     {
@@ -1031,10 +1118,12 @@ namespace DataTableAsync
             try { return Convert.ChangeType(value, type); }
             catch { return null; }
         }
-        internal static Type GetDataType(string value)
+        internal static Tuple<Type, object> GetDataType(string value)
         {
-            if (value == null)
-                return typeof(string);
+            if (value == null) {
+                return Tuple.Create(typeof(string), (object)value);
+            }
+
             else if (decimal.TryParse(value, out decimal _Decimal))
             {
                 // REM /// NUMERIC+COULD BE DECIMAL Or INTEGER
@@ -1043,34 +1132,34 @@ namespace DataTableAsync
                     // REM /// INTEGER
                     // REM /// MUST BE A WHOLE NUMBER. START WITH SMALLEST AND WORK UP
                     if (byte.TryParse(value, out byte _Byte))
-                        return typeof(byte);
+                        return Tuple.Create(typeof(byte), (object)_Byte);
                     else
                     {
                         if (short.TryParse(value, out short _Short))
-                            return typeof(short);
+                            return Tuple.Create(typeof(short), (object)_Short);
                         else
                         {
                             if (int.TryParse(value, out int _Integer))
-                                return typeof(int);
+                                return Tuple.Create(typeof(int), (object)_Integer);
                             else
                             {
                                 if (long.TryParse(value, out long _Long))
-                                    return typeof(long);
+                                    return Tuple.Create(typeof(long), (object)_Long);
                                 else
                                     // REM /// NOT DATE, BOOLEAN, DECIMAL, NOR INTEGER...DEFAULT TO STRING
-                                    return typeof(string);
+                                    return Tuple.Create(typeof(string), (object)null);
                             }
                         }
                     }
                 }
                 else
                     // REM /// DECIMAL
-                    return typeof(decimal);
+                    return Tuple.Create(typeof(decimal), (object)_Decimal);
             }
             else
             {
                 if (bool.TryParse(value, out bool _Boolean) | value.ToUpperInvariant() == "TRUE" | value.ToUpperInvariant() == "FALSE")
-                    return typeof(bool);
+                    return Tuple.Create(typeof(bool), (object)_Boolean);
 
                 else
                 {
@@ -1081,25 +1170,33 @@ namespace DataTableAsync
                 "M/d/yyyy h:mm:ss tt",
                 "yyyy-M-d h:mm:ss tt"
             };
-                    if (DateTime.TryParse(value, CultureInfo.CurrentCulture, DateTimeStyles.AdjustToUniversal, out DateTime _Date) | DateTime.TryParseExact(value, dateFormats, CultureInfo.CurrentCulture, DateTimeStyles.AllowWhiteSpaces, out _Date))
+                    if (DateTime.TryParse(value, CultureInfo.CurrentCulture, DateTimeStyles.AdjustToUniversal, out DateTime date1))
                     {
-                        if (_Date.Date == _Date)
+                        if (date1.Date == date1)
                             // supposed to be no time
-                            return typeof(DateTime);
+                            return Tuple.Create(typeof(DateTime), (object)date1);
                         else
                             // supposed to be with time
-                            return typeof(DateTime);
+                            return Tuple.Create(typeof(DateTime), (object)date1);
+                    }
+                    else if (DateTime.TryParseExact(value, dateFormats, CultureInfo.CurrentCulture, DateTimeStyles.AllowWhiteSpaces, out DateTime date2)) {
+                        if (date2.Date == date2)
+                            // supposed to be no time
+                            return Tuple.Create(typeof(DateTime), (object)date2);
+                        else
+                            // supposed to be with time
+                            return Tuple.Create(typeof(DateTime), (object)date2);
                     }
                     else
                         // Some objects can not be converted in the ToString Function ... they only show as the object name
                         if (value.Contains("Drawing.Bitmap") | value.Contains("Drawing.Image"))
-                        return typeof(Image);
+                        return Tuple.Create(typeof(Image), (object)null);
 
                     else if (value.Contains("Drawing.Icon"))
-                        return typeof(Icon);
+                        return Tuple.Create(typeof(Icon), (object)null);
 
                     else
-                        return typeof(string);
+                        return Tuple.Create(typeof(string), (object)value);
                 }
             }
         }
@@ -1181,8 +1278,67 @@ namespace DataTableAsync
                     return null;
             }
         }
-        internal static Type GetDataType(IEnumerable<string> strings) => strings == null ? null : GetDataType(strings.Select(s => GetDataType(s)));
-        internal static Type GetDataType(IEnumerable<object> objects) => objects == null ? null : GetDataType(objects.Where(o => o != null).Select(o => GetDataType(o.ToString())));
+        internal static Type GetDataType(object[] objects)
+        {
+            if (objects == null)
+                return typeof(string);
+            else
+            {
+                var nonNullTypes = new List<Type>();
+                foreach(object obj in objects)
+                    if(DBNull.Value != obj && obj !=null)
+                        nonNullTypes.Add(GetDataType(obj.ToString()).Item1);
+                return GetDataType(nonNullTypes);
+            }
+        }
+        public static bool Cast(Type tryType, object value)
+        {
+            if (value == null) { return true; }
+            else if (tryType == typeof(char)) { return value.GetType() == typeof(char); }
+            else if (tryType == typeof(string)) { return value.GetType() == typeof(string); }
+            else if (tryType == typeof(Bitmap)) { return value.GetType() == typeof(System.Drawing.Image) | value.GetType() == typeof(Bitmap); }
+            else if (tryType == typeof(bool))
+            {
+                // something here with 0 | 1
+                return value.GetType() == typeof(bool) | new string[] { "true", "false" }.Contains(value.ToString().ToLowerInvariant());
+            }
+            else if (tryType == typeof(DateTime))
+            {
+                // something here with cultureinfo
+                return value.GetType() == typeof(DateTime);
+            }
+            else
+            {
+                string valueString = value.ToString().ToLowerInvariant();
+                if (valueString.All(char.IsNumber))
+                {
+                    if (tryType == typeof(double)) { return double.TryParse(valueString, out double result); }
+                    else if (tryType == typeof(decimal)) { return decimal.TryParse(valueString, out decimal result); }
+                    else if (tryType == typeof(long)) { return long.TryParse(valueString, out long result); }
+                    else if (tryType == typeof(ulong)) { return ulong.TryParse(valueString, out ulong result); }
+                    else if (tryType == typeof(int)) { return int.TryParse(valueString, out int result); }
+                    else if (tryType == typeof(float)) { return float.TryParse(valueString, out float result); }
+                    else if (tryType == typeof(short)) { return short.TryParse(valueString, out short result); }
+                    else if (tryType == typeof(ushort)) { return ushort.TryParse(valueString, out ushort result); }
+                    else if (tryType == typeof(sbyte)) { return sbyte.TryParse(valueString, out sbyte result); }
+                    else if (tryType == typeof(byte)) { return byte.TryParse(valueString, out byte result); }
+                    //else if (tryType == typeof(nuint)) { return nuint.TryParse(valueString, out nuint result); }
+                    //else if (tryType == typeof(nint)) { return nint.TryParse(valueString, out nint result); }
+                    else { return false; }
+                }
+                else { return false; }
+            }
+        }
+        private static List<string> EnumNames(Type enumType) => Enum.GetNames(enumType).ToList();
+        public static T ParseEnum<T>(string value)
+        {
+            foreach (var enumItem in EnumNames(typeof(T)))
+            {
+                if (enumItem.ToUpperInvariant() == value?.ToUpperInvariant())
+                    return (T)Enum.Parse(typeof(T), enumItem, true);
+            }
+            return default;
+        }
     }
     #endregion
 }
