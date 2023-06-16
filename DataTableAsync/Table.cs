@@ -595,16 +595,25 @@ namespace DataTableAsync
                     {
                         string columnName = key.ToString();
                         Column removeColumn = Table.Columns[columnName];
+                        var colIndex = removeColumn.Index;
+                        var colsToRight = new List<Column>(Table.Columns.Values.Where(c => c.Index > colIndex).OrderByDescending(c => c.Index));
                         if (removeColumn.IsKey)
                         {
                             // reindex the primary keys without the removeColumn
                             Dictionary<byte, Column> newKeys = new Dictionary<byte, Column>();
                             foreach (var col in Table.primaryKeys.OrderBy(c => c.Key))
-                                if (col.Value != removeColumn) newKeys.Add((byte)newKeys.Count, col.Value);
+                                if (col.Value != removeColumn)
+                                    newKeys.Add((byte)newKeys.Count, col.Value);
                             Table.primaryKeys = newKeys;
                         }
                         base.Remove(key);
-                        foreach (Row row in Table.AsEnumerable) { Table.Rows[row.Index].Cells.Remove(key.ToString()); }
+                        var colDict = Table.Columns.Values.Select((col, index) => new { col, index }).ToDictionary(k => k.col.Name, v => v.index);
+                        foreach (Row row in Table.AsEnumerable)
+                            Table.Rows[row.Index].Cells.Remove(key.ToString());
+                        foreach (var colToRight in colsToRight) {
+                            colToRight.Index = colDict[colToRight.Name];
+                        }
+                        //Debugger.Break();
                         Table.OnColumnsChanged(EventType.ColumnRemove, removeColumn);
                     }
                 }
@@ -703,6 +712,8 @@ namespace DataTableAsync
                     {
                         if (Table != null)
                         {
+                            var keyNames = new List<string>(Table.PrimaryKeys.Select(c => c.Name));
+                            var pkeys = new List<Column>();
                             List<Column> orderedCols = new List<Column>(Table.Columns.Values.OrderBy(c => c.Index));
                             List<int> ints = new List<int>(orderedCols.Select(c => c.Index));
                             ints.Remove(index);
@@ -719,16 +730,21 @@ namespace DataTableAsync
                             }
                             Table.Columns.Clear();
                             Table.Rows.Clear();
-                            foreach (var col in orderedCols.OrderBy(c => c.Index))
-                                Table.Columns.Add(col.Name, col.DataType, col.DefaultValue);
+                            foreach (var col in orderedCols.OrderBy(c => c.Index)) {
+                                var newCol = new Column(col.Name, col.DataType, col.DefaultValue);
+                                Table.Columns.Add(newCol);
+                                if (keyNames.Contains(col.Name))
+                                    pkeys.Add(newCol);
+                            }
                             foreach (var row in rows)
                                 Table.Rows.Add(row);
+                            Table.PrimaryKeys = pkeys.ToArray();
                         }
                         index = value;
                     }
                 }
             }
-            private int index;
+            internal int index;
             public bool IsKey => Table != null && Table.PrimaryKeys.Contains(this);
             public int KeyIndex
             {
