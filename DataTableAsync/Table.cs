@@ -163,8 +163,8 @@ namespace DataTableAsync
         public Table Copy()
         {
             Table replica = Clone();
-            //new Row() { ... }
-            foreach (Row row in Rows.Values) { replica.Rows.Add(row); }
+            foreach (Row row in Rows.Values)
+                replica.Rows.Add(row.Values);
             return replica;
         }
         public Table Clone()
@@ -176,7 +176,8 @@ namespace DataTableAsync
             {
                 Column replicaColumn = new Column() { Name = column.Name, DataType = column.DataType, DefaultValue = column.DefaultValue };
                 replica.Columns.Add(replicaColumn);
-                if (column.IsKey) primarykeys.Add(replicaColumn);
+                if (column.IsKey)
+                    primarykeys.Add(replicaColumn);
             }
             replica.PrimaryKeys = primarykeys.ToArray();
             return replica;
