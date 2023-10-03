@@ -9,7 +9,6 @@ using Newtonsoft.Json.Linq;
 using System.Drawing;
 using System.Threading.Tasks;
 using System.Globalization;
-using System.Text.RegularExpressions;
 using static DataTableAsync.Table;
 using System.Diagnostics;
 
@@ -20,7 +19,11 @@ namespace DataTableAsync
 
     public class Table
     {
-        internal const string bar = "|";
+        private readonly static CultureInfo enUS = new CultureInfo("en-US", false);
+        private const string dateFormat = "yyyy-MM-dd HH:mm:ss.fff";
+        internal readonly static string[] dateFormats = new string[] { "MM/dd/yyyy", "MM/dd/yy" };
+        internal readonly static NumberStyles numberStyles = NumberStyles.AllowThousands | NumberStyles.AllowDecimalPoint | NumberStyles.AllowCurrencySymbol | NumberStyles.AllowParentheses | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite | NumberStyles.AllowLeadingSign;
+
         #region" ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ E V E N T S "
         protected virtual void OnTableCleared(EventType tableEvent) => TableCleared?.Invoke(this, new TableEventArgs(tableEvent));
         public event EventHandler<TableEventArgs> TableCleared;
@@ -36,6 +39,8 @@ namespace DataTableAsync
         #endregion
         //[JsonConverter(typeof(CustomConverter))]
         public string Name { get; set; }
+        [JsonIgnore]
+        public object Tag { get; set; }
         //[JsonConverter(typeof(CustomConverter))]
         public virtual ColumnCollection<string, Column> Columns { get; }
         //[JsonConverter(typeof(CustomConverter))]
@@ -67,11 +72,11 @@ namespace DataTableAsync
         public Table(string filepath)
         {
             Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
-            if (File.Exists(filepath ?? string.Empty)) Json_toTable(filepath);
+            if (File.Exists(filepath ?? string.Empty))
+                Json_toTable(filepath);
             else
-            {
-                // html?
-            }
+            {   
+            } // html?
         }
         public Table(FileInfo jsonFile)
         {
@@ -293,83 +298,30 @@ namespace DataTableAsync
 
                     Font headerFont = new Font(tableFont.FontFamily.Name, tableFont.Size + 1);
                     Dictionary<Row, List<string>> Rows = new Dictionary<Row, List<string>>();
-
-                    Dictionary<string, Dictionary<int, string>> Columnstrings = new Dictionary<string, Dictionary<int, string>>();
                     Dictionary<string, int> columnWidths = new Dictionary<string, int>();
-                    Dictionary<string, string> columnAlignments = new Dictionary<string, string>();
+                    Dictionary<string, string> colAligns = new Dictionary<string, string>();
+
+                    #region" align preferences "
                     List<Type> lefts = new List<Type> { typeof(string) };
                     List<Type> centers = new List<Type> { typeof(bool), typeof(byte), typeof(short), typeof(int), typeof(long), typeof(DateTime), typeof(Icon), typeof(Image) };
                     List<Type> rights = new List<Type> { typeof(double), typeof(decimal) };
-                    int columnIndex = 1;
-                    const double testDec = 1.5;
+                    #endregion
+
+                    var rowStrings = Row_strings();
 
                     using (Bitmap bmp = new Bitmap(50, 50))
                     {
                         using (Graphics g = Graphics.FromImage(bmp))
                         {
-                            foreach (Column col in table.Columns.Values)
-                            {
-                                Type colType = col.DataType;
-                                var decConvert = SurroundClass.ChangeType(testDec, colType);
-                                bool colType_isDecimal = decConvert is testDec;
-                                bool colValues_areDecimal = colType_isDecimal;
-                                if (colType_isDecimal & col.Values.Any())
-                                {
-                                    var colTypes = new List<Type>();
-                                    foreach (var colValue_kvp in col.Values)
-                                    {
-                                        var colValue = colValue_kvp.Value;
-                                        if (!(colValue == null | colValue == DBNull.Value))
-                                            colTypes.Add(SurroundClass.GetDataType(colValue.ToString()).Item1);
-                                    }
-                                    Type colGetType = SurroundClass.GetDataType(colTypes);
-                                    decConvert = SurroundClass.ChangeType(testDec, colGetType);
-                                    double.TryParse(decConvert.ToString(), out double dblConvert);
-                                    colValues_areDecimal = dblConvert == testDec;
-                                    if (!colValues_areDecimal) colType = colGetType;
-                                }
-
-                                Dictionary<int, string> strings = new Dictionary<int, string>();
-                                int rowIndex = 0;
-                                List<string> rowArray = new List<string>();
-                                foreach (Row row in table.Rows.Values)
-                                {
-                                    object rowCell = row.Cells[col.Name];
-                                    var castCell = SurroundClass.ChangeType(rowCell, colType);
-                                    string cellString;
-                                    if (rowCell == DBNull.Value | rowCell == null) cellString = string.Empty;
-                                    else if (colType == typeof(DateTime)) // Dates
-                                    {
-                                        DateTime cellDate = (DateTime)castCell;
-                                        if (cellDate.TimeOfDay.Ticks == 0)
-                                            cellString = cellDate.ToShortDateString();
-                                        else
-                                            cellString = cellDate.ToString("yyyy-MM-dd HH:mm:ss.ffffff", CultureInfo.InvariantCulture);
-                                    }
-                                    else if (colValues_areDecimal) // Decimal .
-                                    {
-                                        NumberFormatInfo nfi = new CultureInfo("en-US", false).NumberFormat;
-                                        // Displays a value with the default separator (".")
-                                        bool testDouble = double.TryParse(rowCell.ToString(), out double doubleValue);
-                                        cellString = doubleValue.ToString("N", nfi);
-                                    }
-                                    else { cellString = Regex.Replace(rowCell.ToString(), @"[\n]", "<br/>"); } // Assume string
-                                    strings.Add(rowIndex, cellString);
-                                    if (!Rows.ContainsKey(row)) { Rows.Add(row, new List<string>()); }
-                                    Rows[row].Add(cellString);
-                                    rowIndex += 1;
-                                }
-                                Columnstrings.Add(col.Name, strings);
-
-                                double columnHeadWidth = g.MeasureString(col.Name, headerFont).Width;
-                                double columnMaxContentWidth = strings.Values.Any() ? strings.Values.Select(c => g.MeasureString(c, tableFont).Width).Max() : 0;
-                                double columnWidth = 18 + columnHeadWidth >= columnMaxContentWidth ? columnHeadWidth : columnMaxContentWidth;
-
-                                columnWidths.Add(col.Name, Convert.ToInt32(Math.Ceiling(columnWidth + 6))); // padded 6
-                                                                                                            // tr td:nth-child(2) {text-align: right;}
-                                string columnAlignment = $"tr td:nth-child({columnIndex})" + " {text-align: " + (lefts.Contains(colType) ? "left" : rights.Contains(colType) ? "right" : "center").ToString() + ";}";
-                                columnAlignments.Add(col.Name, columnAlignment);
-                                columnIndex += 1;
+                            var colIndx = 1;
+                            var hdrNames = rowStrings[-2];
+                            foreach (var col in Columns.Values) {
+                                var colName = hdrNames[col.Name];
+                                columnWidths[col.Name] = 18 + Convert.ToInt32(g.MeasureString(new string('X', colName.Length), headerFont).Width);
+                                var lftRghtCtr = lefts.Contains(col.DataType) ? "left" : rights.Contains(col.DataType) ? "right" : "center";
+                                var colAlign = $"tr td:nth-child({colIndx})" + " {text-align: " + lftRghtCtr + ";}";
+                                colAligns.Add(col.Name, colAlign);
+                                colIndx++;
                             }
                         }
                     }
@@ -389,18 +341,19 @@ namespace DataTableAsync
                     Top.Add("table {border-collapse:collapse; border: 1px solid #778db3;}"); // width: 100%;
                     Top.Add("th {" + $"font-family:{headerFont.FontFamily.Name}; background-color:{hexHdrBackColor}; color:{hexHdrForeColor}; text-align:center; font-weight:bold; font-size:{headSz}px; border: 1px solid #778db3; white-space: nowrap;" + "}");
                     Top.Add("td {" + $"font-family:{tableFont.FontFamily.Name}; text-align:left; font-size:{rowSz}px; border: 1px #696969; white-space: nowrap;" + "}");
-                    Top.Add(string.Join(Environment.NewLine, columnAlignments.Values));
+                    Top.Add(string.Join(Environment.NewLine, colAligns.Values));
                     Top.Add("</style>");
                     Top.Add("</head>");
                     Top.Add("<body>");
                     Top.Add("<table>");
                     Top.Add("<tr>" + string.Join("", from C in columnWidths select "<th width=" + C.Value + ";>" + C.Key + "</th>") + "</tr>");
                     List<string> Middle = new List<string>();
-                    foreach (var Row in Rows)
+                    // "#F5F5F5" : "#FFFFFF"
+                    foreach (var row in rowStrings.Values.Skip(2))
                     {
-                        // "#F5F5F5" : "#FFFFFF"
-                        Middle.Add("<tr style=background-color:" + (Middle.Count % 2 == 0 ? hexRowBackColor : "#FFFFFF").ToString() + $"; color:{hexRowForeColor}>" + string.Join("", from IA in Row.Value select "<td>" + IA + "</td>") + "</tr>");
-                    }
+                        var tds = string.Join("", row.Values.Skip(1).Select(td => $"<td>{td.Trim()}</td>"));
+                        Middle.Add("<tr style=background-color:" + (Middle.Count % 2 == 0 ? hexRowBackColor : "#FFFFFF").ToString() + $"; color:{hexRowForeColor}>" + tds + "</tr>");
+                    }                        
                     List<string> Bottom = new List<string>()
         {
             "</table>",
@@ -420,53 +373,182 @@ namespace DataTableAsync
         {
             get
             {
-                //row\Col1 ‖ Col2 ‖ Col3 ‖ Col4|Col5|Col6|Col7|Col8|Col9
-                //0  |x   |y   |z   |    |    |    |    |    |
-                //1  |x   |y   |z   |    |    |    |    |    |
-                //2  |x   |y   |z   |    |    |    |    |    |
-                //3  |x   |y   |z   |    |    |    |    |    |
-                //4  |x   |y   |z   |    |    |    |    |    |
-                //5  |x   |y   |z   |    |    |    |    |    |
-                //6  |x   |y   |z   |    |    |    |    |    |
-                //7  |x   |y   |z   |    |    |    |    |    |
-                List<string> rowLines = new List<string>();
-                int rowIndexWidth = new int[] { Rows.Any() ? Rows.Keys.Max().ToString().Length : 0, "row".Length }.Max();
-                List<string> header = new List<string>(new string[] { $"row{new string(' ', rowIndexWidth - "row".Length)}" });
-                Dictionary<string, List<int>> columnWidths = new Dictionary<string, List<int>>();
-                Dictionary<string, Dictionary<int, string>> Columnstrings = new Dictionary<string, Dictionary<int, string>>();
-                foreach (var col in Columns)
-                {
-                    columnWidths.Add(col.Key, new List<int>());
-                    columnWidths[col.Key].Add(col.Key.Length);
-                    Columnstrings.Add(col.Key, new Dictionary<int, string>());
-                    foreach (var row in Rows)
-                    {
-                        object cellValue = row.Value.Cells[col.Key];
-                        string cellString = cellValue == DBNull.Value || cellValue == null ? string.Empty : cellValue.ToString(); // dates always long form :(
-                        Columnstrings[col.Key].Add(row.Key, cellString);
-                        columnWidths[col.Key].Add(cellString.Length);
-                    }
-                    int colMaxWidth = columnWidths[col.Key].Max();
-                    header.Add($"{col.Key}{new string(' ', colMaxWidth - col.Key.Length)}");
-                }
-                // add header row 1st
-                rowLines.Add(string.Join(bar, header));
-                foreach (var row in Rows)
-                {
-                    List<string> rowArray = new List<string>(new string[] { $"{row.Key}{new string(' ', rowIndexWidth - row.Key.ToString().Length)}" });
-                    foreach (var col in Columns)
-                    {
-                        int columnWidth = columnWidths[col.Key].Max();
-                        string cellString = Columnstrings[col.Key][row.Key];
-                        rowArray.Add($"{cellString}{new string(' ', columnWidth - cellString.Length)}");
-                    }
-                    rowLines.Add(string.Join(bar, rowArray));
-                }
-                return string.Join(Environment.NewLine, rowLines);
+                //row\Col1 ┼ Col2 ┼ Col3 ┼ Col4 ┼ Col5 ┼ Col6 ┼ Col7 ┼ Col8 ┼ Col9
+                //0        │x     │y     │z     │      │      │      │      │       │
+                //1        │x     │y     │z     │      │      │      │      │       │
+                //2        │x     │y     │z     │      │      │      │      │       │
+                //3        │x     │y     │z     │      │      │      │      │       │
+                //4        │x     │y     │z     │      │      │      │      │       │
+                //5        │x     │y     │z     │      │      │      │      │       │
+                //6        │x     │y     │z     │      │      │      │      │       │
+                //7        │x     │y     │z     │      │      │      │      │       │
+                var rowStrings = Row_strings();
+                return string.Join(Environment.NewLine, from row in rowStrings select string.Join(row.Key == -1 ? "┼" : "│", from c in row.Value select c.Value));
             }
         }
+        public Dictionary<int, Dictionary<string, string>> Row_strings()
+        {
+            // the pad right function transforms a string to the length of the int paranmter and only pads right IF the string.length is LOWER than the parameter
+            var rowIndxColWidth = new int[] { Rows.Count >= 1000 ? Rows.Count - 1 : 3 }.Max();
+            var colStrs = new Dictionary<string, Dictionary<int, string>>();
+            var rowStrs = new Dictionary<int, Dictionary<string, string>>();
+            var colWdths = new Dictionary<string, int>();
+            rowStrs[-2] = new Dictionary<string, string> { { "row", "row".PadRight(rowIndxColWidth) } }; // headers = -2
+            rowStrs[-1] = new Dictionary<string, string> { { "row", new string('─', 3) } }; // separating line = -1
+
+            // iterate first to collect the widths of each column
+            foreach (var col in Columns.Values)
+            {
+                colStrs[col.Name] = new Dictionary<int, string>();
+                colWdths[col.Name] = col.Name.Length;
+                var objFormat = ObjectFormat(col.Name);
+                foreach (var row in Rows)
+                {
+                    object cellValue = row.Value[col.Name];
+                    string cellString = string.Empty;
+                    if (!(cellValue == null | cellValue == DBNull.Value))
+                    {
+                        if (col.DataType == typeof(DateTime))
+                        {
+                            cellString = ((DateTime)cellValue).ToString(objFormat);
+                        }
+                        else if (col.DataType == typeof(DateTime[]) | col.DataType == typeof(List<DateTime>) | col.DataType == typeof(IEnumerable<DateTime>))
+                        {
+                            var cellStrings = new List<string>();
+                            foreach (var date in (IEnumerable<DateTime>)cellValue)
+                                cellStrings.Add(date.ToString(objFormat));
+                            cellString = string.Join(" ▪ ", cellStrings);
+                        }
+                        else if (col.DataType == typeof(float) | col.DataType == typeof(decimal) | col.DataType == typeof(double))
+                        {
+                            var cellValStr = cellValue.ToString();
+                            //var isNeg = cellValStr.ToLower().Contains("cr");
+                            //cellValStr = Regex.Replace(cellValStr, "[a-z][A-Z]{1,}", string.Empty);
+                            decimal.TryParse(cellValStr, numberStyles, enUS, out decimal cellVal);
+                            //if (isNeg)
+                            //    cellVal = -1 * cellVal;
+                            cellString = cellVal.ToString(objFormat);
+                        }
+                        else
+                        {
+                            cellString = cellValue.ToString();
+                        }
+                    }
+                    colStrs[col.Name][row.Key] = cellString;
+                    if (cellString.Length > colWdths[col.Name])
+                        colWdths[col.Name] = cellString.Length;
+                }
+                rowStrs[-2][col.Name] = col.Name.PadRight(new int[] { colWdths[col.Name], col.Name.Length }.Max());
+                rowStrs[-1][col.Name] = new string('─', rowStrs[-2][col.Name].Length);
+            }
+
+            // now iterate to create a list of the rows
+            foreach (var row in Rows) {
+                rowStrs[row.Key] = new Dictionary<string, string> { { "row", row.Key.ToString().PadRight(rowIndxColWidth) } };
+                var rowArray = new List<string> { row.Key.ToString().PadRight(rowIndxColWidth) };
+                foreach (var col in Columns)
+                {
+                    string cellString = colStrs[col.Key][row.Key];
+                    cellString = cellString.PadRight(colWdths[col.Key]);
+                    rowArray.Add(cellString);
+                    rowStrs[row.Key][col.Key] = cellString;
+                }
+            }
+
+            // center column names
+            foreach (var col in rowStrs[-2].ToArray())
+            {
+                /// |xx        |   10 wide, but name is 2 wide, padded 8
+                /// divide extra / 2
+                var padLen = col.Value.Length - col.Key.Length;
+                if (padLen > 1)
+                {
+                    var padLftRght = padLen / 2;
+                    rowStrs[-2][col.Key] = $"{new string(' ', padLftRght)}{col.Key}{new string(' ', padLen - padLftRght)}";
+                }
+            }
+            return rowStrs;
+        }
+        public Dictionary<string, Dictionary<int, string>> Col_strings() {
+            var rowStrs = Row_strings();
+            var colStrs = new Dictionary<string, Dictionary<int, string>>();
+            foreach (var rw in rowStrs.Skip(2))
+            {
+                foreach (var col in rw.Value)
+                {
+                    if (!colStrs.ContainsKey(col.Key))
+                        colStrs[col.Key] = new Dictionary<int, string>();
+                    colStrs[col.Key][rw.Key] = col.Value;
+                }
+            }
+            return colStrs;
+        }
+        private string DateFormat(List<DateTime> dates)
+        {
+            bool allMidnight = true;
+            foreach (var date in dates)
+            {
+                if (date.TimeOfDay.Ticks != 0)
+                {
+                    allMidnight = false;
+                    break;
+                }
+            }
+            return allMidnight ? dateFormat.Split(' ')[0] : dateFormat;
+        }
+        private string ObjectFormat(string colName) {
+            
+            var format = string.Empty;
+            if (Columns.ContainsKey(colName))
+            {
+                var col = Columns[colName];
+                var colValues = col.Values.Values.Where(d => !(d == null | d == DBNull.Value));
+                if (col.DataType == typeof(DateTime))
+                {
+                    var dates = colValues.Select(d => (DateTime)d).ToList();
+                    format = DateFormat(dates);
+                }
+                else if (col.DataType == typeof(DateTime[]) | col.DataType == typeof(List<DateTime>) | col.DataType == typeof(IEnumerable<DateTime>))
+                {
+                    bool allMidnight = true;
+                    foreach (var dateArray in colValues)
+                    {
+                        var dates = new List<DateTime>((IEnumerable<DateTime>)dateArray); // DateTime[] | List<DateTime> can be cast as IEnumerable<DateTime>
+                        format = DateFormat(dates);
+                        if (format == dateFormat) {
+                            allMidnight = false;
+                            break;
+                        } // if equals long date format
+                    }
+                    format = allMidnight ? dateFormat.Split(' ')[0] : dateFormat;
+                }
+                else if (col.DataType == typeof(float) | col.DataType == typeof(decimal) | col.DataType == typeof(double))
+                {
+                    var decPlaces = 0;
+                    foreach (var val in colValues) {
+                        var dec = val.ToString().Split('.');
+                        if (dec.Length > 1 && dec[1].Length > decPlaces)
+                            decPlaces = dec[1].Length;
+                    }
+                    format = decPlaces == 0 ? "" : $"N{decPlaces}";
+                }
+                return format;
+            }
+            else
+                return null;
+        }
         [JsonIgnore]
-        public string Json => JsonConvert.SerializeObject(this, Formatting.None);
+        public string Json
+        {
+            get
+            {
+                try { return JsonConvert.SerializeObject(this, Formatting.None) ?? string.Empty; }
+                catch (JsonSerializationException jse)
+                {
+                    return jse.Message;
+                }
+            }
+        }
         [JsonIgnore]
         public Column[] PrimaryKeys
         {
@@ -520,6 +602,12 @@ namespace DataTableAsync
             else
                 return null;
         }
+        public Row NewRow() {
+            object nullObj = null;
+            var nulls = Enumerable.Range(0, Columns.Count).Select(n => nullObj);
+            var newRow = new Row(nulls, this);
+            return newRow;
+        }
         internal void AddKeys(KeyValuePair<int, Row> row)
         {
             var tempDict = Keys;
@@ -546,7 +634,7 @@ namespace DataTableAsync
             //Debugger.Break();
         }
 
-        #region" ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ N E S T E D   C L A S S E S [ COLUMNS|ROWS] "
+        #region" ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ N E S T E D   C L A S S E S [ COLUMNS|ROWS ] "
         [Serializable]
         public sealed class ColumnCollection<TKey, TValue> : Dictionary<TKey, TValue>
         {
@@ -951,7 +1039,7 @@ namespace DataTableAsync
             public object[] Values => Cells.Values.ToArray();
             public override string ToString()
             {
-                string cellString = Cells.Any() ? string.Join(bar, Cells.Values.Select(c => (c ?? string.Empty).ToString())) : "[empty]";
+                string cellString = Cells.Any() ? string.Join("│", Cells.Values.Select(c => (c ?? string.Empty).ToString())) : "[empty]";
                 return $"[{Index}] {cellString}";
             }
 
