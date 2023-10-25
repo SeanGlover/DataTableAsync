@@ -408,31 +408,20 @@ namespace DataTableAsync
                     string cellString = string.Empty;
                     if (!(cellValue == null | cellValue == DBNull.Value))
                     {
-                        if (col.DataType == typeof(DateTime))
+                        var enumerable = cellValue as IEnumerable;
+                        if (col.DataType != typeof(string) & enumerable != null)
                         {
-                            cellString = ((DateTime)cellValue).ToString(objFormat);
-                        }
-                        else if (col.DataType == typeof(DateTime[]) | col.DataType == typeof(List<DateTime>) | col.DataType == typeof(IEnumerable<DateTime>))
-                        {
-                            var cellStrings = new List<string>();
-                            foreach (var date in (IEnumerable<DateTime>)cellValue)
-                                cellStrings.Add(date.ToString(objFormat));
-                            cellString = string.Join(" ▪ ", cellStrings);
-                        }
-                        else if (col.DataType == typeof(float) | col.DataType == typeof(decimal) | col.DataType == typeof(double))
-                        {
-                            var cellValStr = cellValue.ToString();
-                            //var isNeg = cellValStr.ToLower().Contains("cr");
-                            //cellValStr = Regex.Replace(cellValStr, "[a-z][A-Z]{1,}", string.Empty);
-                            decimal.TryParse(cellValStr, numberStyles, enUS, out decimal cellVal);
-                            //if (isNeg)
-                            //    cellVal = -1 * cellVal;
-                            cellString = cellVal.ToString(objFormat);
+                            var objStrings = new List<string>();
+                            foreach (var item in enumerable)
+                            {
+                                var objType = item.GetType();
+                                var obStr = ObjectToString(objType, item, objFormat);
+                                objStrings.Add(obStr);
+                            }                                
+                            cellString = string.Join(col.DataType.ToString().ToLower().Contains("char") ? "" : "•", objStrings);
                         }
                         else
-                        {
-                            cellString = cellValue.ToString();
-                        }
+                            cellString = ObjectToString(col.DataType, cellValue, objFormat);
                     }
                     colStrs[col.Name][row.Key] = cellString;
                     if (cellString.Length > colWdths[col.Name])
@@ -449,7 +438,10 @@ namespace DataTableAsync
                 foreach (var col in Columns)
                 {
                     string cellString = colStrs[col.Key][row.Key];
-                    cellString = cellString.PadRight(colWdths[col.Key]);
+                    if (col.Value.DataType == typeof(float) | col.Value.DataType == typeof(decimal) | col.Value.DataType == typeof(double))
+                        cellString = cellString.PadLeft(colWdths[col.Key]);
+                    else
+                        cellString = cellString.PadRight(colWdths[col.Key]);
                     rowArray.Add(cellString);
                     rowStrs[row.Key][col.Key] = cellString;
                 }
@@ -468,6 +460,21 @@ namespace DataTableAsync
                 }
             }
             return rowStrs;
+        }
+        private static string ObjectToString(Type objectType, object value, string objFormat)
+        {
+            string objStr;
+            if (objectType == typeof(DateTime))
+                objStr = ((DateTime)value).ToString(objFormat);
+            else if (objectType == typeof(float) | objectType == typeof(decimal) | objectType == typeof(double))
+            {
+                var cellValStr = value.ToString();
+                decimal.TryParse(cellValStr, numberStyles, enUS, out decimal cellVal);
+                objStr = cellVal.ToString(objFormat);
+            }
+            else
+                objStr = value.ToString();
+            return objStr;
         }
         public Dictionary<string, Dictionary<int, string>> Col_strings() {
             var rowStrs = Row_strings();
@@ -606,6 +613,7 @@ namespace DataTableAsync
             object nullObj = null;
             var nulls = Enumerable.Range(0, Columns.Count).Select(n => nullObj);
             var newRow = new Row(nulls, this);
+            Rows.Add(newRow);
             return newRow;
         }
         internal void AddKeys(KeyValuePair<int, Row> row)
@@ -765,10 +773,25 @@ namespace DataTableAsync
                     }
                 }
             }
+            private readonly Type[] numbers = new Type[] { typeof(byte), typeof(byte), typeof(sbyte), typeof(short), typeof(ushort), typeof(int), typeof(uint), typeof(long), typeof(ulong), typeof(float), typeof(double), typeof(decimal) };
             private Type datatype;
             public object DefaultValue
             {
-                get { return defaultValue; }
+                get
+                {
+                    if (defaultValue == null)
+                    {
+                        if (numbers.Contains(datatype))
+                            return 0;
+                        else if (datatype == typeof(DateTime))
+                            return DateTime.MinValue;
+                        else if (datatype == typeof(bool))
+                            return false;
+                        else if (datatype == typeof(string))
+                            return AllowNulls ? null : string.Empty;
+                    }
+                    return defaultValue;
+                }
                 set
                 {
                     if (defaultValue != value)
@@ -782,6 +805,7 @@ namespace DataTableAsync
                 }
             }
             private object defaultValue = null;
+            public bool AllowNulls { get; set; }
             private async void AwaitTask()
             {
                 while (Table == null) { await Task.Delay(50); }
@@ -792,6 +816,7 @@ namespace DataTableAsync
                 }
             }
             public string Name { get; set; }
+            public object Tag { get; set; }
             public int Index
             {
                 get => index;
@@ -1197,9 +1222,9 @@ namespace DataTableAsync
         public override bool CanWrite => false;
         public override bool CanConvert(Type objectType) => false;
     }
-    internal static class SurroundClass
+    public static class SurroundClass
     {
-        internal static object ChangeType(object value, Type type)
+        public static object ChangeType(object value, Type type)
         {
             if (value == null && type.IsGenericType) return Activator.CreateInstance(type);
             if (value == null) return null;
@@ -1223,7 +1248,7 @@ namespace DataTableAsync
             try { return Convert.ChangeType(value, type); }
             catch { return null; }
         }
-        internal static Tuple<Type, object> GetDataType(string value)
+        public static Tuple<Type, object> GetDataType(string value)
         {
             if (value == null) {
                 return Tuple.Create(typeof(string), (object)value);
@@ -1305,7 +1330,7 @@ namespace DataTableAsync
                 }
             }
         }
-        internal static Type GetDataType(IEnumerable<Type> types)
+        public static Type GetDataType(IEnumerable<Type> types)
         {
             if (types == null)
                 return null;
@@ -1383,7 +1408,7 @@ namespace DataTableAsync
                     return null;
             }
         }
-        internal static Type GetDataType(object[] objects)
+        public static Type GetDataType(object[] objects)
         {
             if (objects == null)
                 return typeof(string);
