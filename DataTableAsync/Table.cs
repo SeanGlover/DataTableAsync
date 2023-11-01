@@ -89,6 +89,24 @@ namespace DataTableAsync
             Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
             DataTable_toTable(sourceTable, primaryKey);
         }
+        public Table(IEnumerable<Table> tables)
+        {
+            var tbls = new List<Table>(tables);
+            if (tbls.Any())
+            {
+                Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
+                var pKeys = new List<Table.Column>();
+                foreach (var col in tbls[0].Columns)
+                {
+                    if (col.Value.IsKey)
+                        pKeys.Add(col.Value);
+                    Columns.Add(col.Value);
+                }
+                foreach (var tbl in tbls)
+                    foreach (var rw in tbl.Rows)
+                        Rows.Add(rw.Value.Values);
+            }
+        }
         public Table(IEnumerable dataSource)
         {
             Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
@@ -809,13 +827,59 @@ namespace DataTableAsync
             private async void AwaitTask()
             {
                 while (Table == null) { await Task.Delay(50); }
-                foreach (Row row in Table.Rows.Values.Where(r => r.Cells[Name] == null))
+                try
                 {
-                    row.Cells[Name] = defaultValue;
-                    Table.OnCellChanged(row, this, row.Cells[Name], defaultValue);
+                    foreach (Row row in Table.Rows.Values.Where(r => r.Cells[Name] == null))
+                    {
+                        row.Cells[Name] = defaultValue;
+                        Table.OnCellChanged(row, this, row.Cells[Name], defaultValue);
+                    }
+                }
+                catch (InvalidOperationException ioe) { Console.WriteLine(ioe.Message); }
+            }
+            public string Name
+            { 
+                get => name;
+                set
+                {
+                    if (name != value)
+                    {
+                        var oldName = name ?? "";
+                        name = value ?? "";
+                        if (Table != null & oldName.Any() & name.Any() & name != oldName)
+                        {
+                            var keyNames = new List<string>(Table.PrimaryKeys.Select(c => c.Name));
+                            var pkeys = new List<Column>();
+                            List<Column> orderedCols = new List<Column>(Table.Columns.Values.OrderBy(c => c.Index));
+                            List<int> ints = new List<int>(orderedCols.Select(c => c.Index));
+                            Table.Columns.Clear();
+                            foreach (var col in orderedCols)
+                                Table.Columns.Add(col);
+                            var rows = new List<object[]>();
+                            foreach (var row in Table.Rows.OrderBy(r => r.Key))
+                            {
+                                var cells = new List<object>();
+                                foreach (var cell in row.Value.Cells.OrderBy(c => Table.Columns[c.Key].Index))
+                                    cells.Add(cell.Value);
+                                rows.Add(cells.ToArray());
+                            }
+                            Table.Columns.Clear();
+                            Table.Rows.Clear();
+                            foreach (var col in orderedCols.OrderBy(c => c.Index))
+                            {
+                                var newCol = new Column(col.Name, col.DataType, col.DefaultValue);
+                                Table.Columns.Add(newCol);
+                                if (keyNames.Contains(col.Name))
+                                    pkeys.Add(newCol);
+                            }
+                            foreach (var row in rows)
+                                Table.Rows.Add(row);
+                            Table.PrimaryKeys = pkeys.ToArray();
+                        }
+                    }
                 }
             }
-            public string Name { get; set; }
+            private string name;
             public object Tag { get; set; }
             public int Index
             {
@@ -924,27 +988,28 @@ namespace DataTableAsync
                     Dictionary<string, object> tempCells = new Dictionary<string, object>(addRow.Cells);
                     addRow.Cells.Clear();
                     int columnIndex = 0;
-                    foreach (Column column in Table.Columns.Values)
+                    foreach (Column col in Table.Columns.Values)
                     {
                         string indexName = $"→{columnIndex++}←";
                         // a Row can be created with a different number of columns, if greater then they will be clipped. If fewer, use the DefaultValue
                         // DataTable's work ok when the ItemArray.Count <= Column.Count but an error is thrown when the array's length exceeds the Column.Count 
-                        object cellValue = tempCells.ContainsKey(indexName) ? tempCells[indexName] : column.DefaultValue;
+                        object cellValue = tempCells.ContainsKey(indexName) ? tempCells[indexName] : col.DefaultValue;
                         bool allowCast = true;
                         if (allowCast)
                         {
                             object castedValue = null;
                             // code to test if value can be cast as the Column.Datatype
-                            Type variableType = column.DataType;
+                            Type variableType = col.DataType;
                             try { castedValue = SurroundClass.ChangeType(cellValue, variableType); }
                             catch (Exception) { }
                             // or just let the value be since some might not work
-                            addRow.Cells.Add(column.Name, castedValue);
+                            addRow.Cells.Add(col.Name, castedValue ?? col.DefaultValue);
                         }
-                        else { addRow.Cells.Add(column.Name, cellValue); }
+                        else { addRow.Cells.Add(col.Name, cellValue ?? col.DefaultValue); }
                     }
                 }
-                if (Table.PrimaryKeys.Any()) Table.AddKeys(new KeyValuePair<int, Row>(rowIndex, addRow));
+                if (Table.PrimaryKeys.Any())
+                    Table.AddKeys(new KeyValuePair<int, Row>(rowIndex, addRow));
                 Table.OnRowsChanged(EventType.RowAdd, addRow);
                 return value;
             }
@@ -978,6 +1043,16 @@ namespace DataTableAsync
                         Row removeRow = Table.Rows[rowIndex];
                         Table.OnRowsChanged(EventType.RowRemove, removeRow);
                         base.Remove(key);
+                        // now reindex
+                        var rws = new List<Row>();
+                        foreach (var rwKVP in this.OrderBy(k=>k.Key))
+                        {
+                            var rw = Table.Rows[int.Parse(rwKVP.Key.ToString())];
+                            rws.Add(rw);
+                        }
+                        Clear();
+                        foreach (var rw in rws)
+                            Add(rw);
                     }
                 }
                 return key;
