@@ -170,9 +170,12 @@ namespace DataTableAsync
                 try
                 {
                     Table fileTable = JsonConvert.DeserializeObject<Table>(File.ReadAllText(fullpath));
-                    Name = fileTable.Name;
-                    foreach (var column in fileTable.Columns) { Columns.Add(column.Key, column.Value); }
-                    foreach (var row in fileTable.Rows) { Rows.Add(row.Key, row.Value); }
+                    if(fileTable != null)
+                    {
+                        Name = fileTable.Name;
+                        foreach (var column in fileTable.Columns) { Columns.Add(column.Key, column.Value); }
+                        foreach (var row in fileTable.Rows) { Rows.Add(row.Key, row.Value); }
+                    }
                 }
                 catch (JsonException je) { Console.WriteLine(je.Message); }
             }
@@ -829,7 +832,7 @@ namespace DataTableAsync
                 while (Table == null) { await Task.Delay(50); }
                 try
                 {
-                    foreach (Row row in Table.Rows.Values.Where(r => r.Cells[Name] == null))
+                    foreach (Row row in Table.Rows.Values.Where(r => r.Cells.ContainsKey(Name) && r.Cells[Name] == null))
                     {
                         row.Cells[Name] = defaultValue;
                         Table.OnCellChanged(row, this, row.Cells[Name], defaultValue);
