@@ -69,14 +69,20 @@ namespace DataTableAsync
                     Rows.Add(row.Value.Values);
             }
         }
-        public Table(string filepath)
+        public Table(string json)
         {
-            Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
-            if (File.Exists(filepath ?? string.Empty))
-                Json_toTable(filepath);
-            else
-            {   
-            } // html?
+            try
+            {
+                Table jsonTable = JsonConvert.DeserializeObject<Table>(json ?? "");
+                if (jsonTable != null)
+                {
+                    Columns = new ColumnCollection<string, Column>(this);
+                    Rows = new RowCollection<int, Row>(this);
+                    foreach (var column in jsonTable.Columns) { Columns.Add(column.Key, column.Value); }
+                    foreach (var row in jsonTable.Rows) { Rows.Add(row.Key, row.Value); }
+                }
+            }
+            catch (JsonException je) { Console.WriteLine(je.Message); }
         }
         public Table(FileInfo jsonFile)
         {
@@ -336,7 +342,7 @@ namespace DataTableAsync
                         {
                             var colIndx = 1;
                             var hdrNames = rowStrings[-2];
-                            foreach (var col in Columns.Values) {
+                            foreach (var col in Columns.Values.OrderBy(c => c.Index)) {
                                 var colName = hdrNames[col.Name];
                                 columnWidths[col.Name] = 18 + Convert.ToInt32(g.MeasureString(new string('X', colName.Length), headerFont).Width);
                                 var lftRghtCtr = lefts.Contains(col.DataType) ? "left" : rights.Contains(col.DataType) ? "right" : "center";
@@ -417,15 +423,18 @@ namespace DataTableAsync
             rowStrs[-2] = new Dictionary<string, string> { { "row", "row".PadRight(rowIndxColWidth) } }; // headers = -2
             rowStrs[-1] = new Dictionary<string, string> { { "row", new string('─', 3) } }; // separating line = -1
 
+            var cols = Columns.Values.OrderBy(c => c.Index).ToList();
+            var rws = Rows.Values.OrderBy(r => r.Index).ToList();
+
             // iterate first to collect the widths of each column
-            foreach (var col in Columns.Values)
+            foreach (var col in cols)
             {
                 colStrs[col.Name] = new Dictionary<int, string>();
                 colWdths[col.Name] = col.Name.Length;
                 var objFormat = ObjectFormat(col.Name);
-                foreach (var row in Rows)
+                foreach (var row in rws)
                 {
-                    object cellValue = row.Value[col.Name];
+                    object cellValue = row[col.Name];
                     string cellString = string.Empty;
                     if (!(cellValue == null | cellValue == DBNull.Value))
                     {
@@ -444,7 +453,7 @@ namespace DataTableAsync
                         else
                             cellString = ObjectToString(col.DataType, cellValue, objFormat);
                     }
-                    colStrs[col.Name][row.Key] = cellString;
+                    colStrs[col.Name][row.Index] = cellString;
                     if (cellString.Length > colWdths[col.Name])
                         colWdths[col.Name] = cellString.Length;
                 }
@@ -453,18 +462,18 @@ namespace DataTableAsync
             }
 
             // now iterate to create a list of the rows
-            foreach (var row in Rows) {
-                rowStrs[row.Key] = new Dictionary<string, string> { { "row", row.Key.ToString().PadRight(rowIndxColWidth) } };
-                var rowArray = new List<string> { row.Key.ToString().PadRight(rowIndxColWidth) };
-                foreach (var col in Columns)
+            foreach (var row in rws) {
+                rowStrs[row.index] = new Dictionary<string, string> { { "row", row.index.ToString().PadRight(rowIndxColWidth) } };
+                var rowArray = new List<string> { row.index.ToString().PadRight(rowIndxColWidth) };
+                foreach (var col in cols)
                 {
-                    string cellString = colStrs[col.Key][row.Key];
-                    if (col.Value.DataType == typeof(float) | col.Value.DataType == typeof(decimal) | col.Value.DataType == typeof(double))
-                        cellString = cellString.PadLeft(colWdths[col.Key]);
+                    string cellString = colStrs[col.Name][row.index];
+                    if (col.DataType == typeof(float) | col.DataType == typeof(decimal) | col.DataType == typeof(double))
+                        cellString = cellString.PadLeft(colWdths[col.Name]);
                     else
-                        cellString = cellString.PadRight(colWdths[col.Key]);
+                        cellString = cellString.PadRight(colWdths[col.Name]);
                     rowArray.Add(cellString);
-                    rowStrs[row.Key][col.Key] = cellString;
+                    rowStrs[row.index][col.Name] = cellString;
                 }
             }
 
@@ -497,7 +506,8 @@ namespace DataTableAsync
                 objStr = value.ToString();
             return objStr;
         }
-        public Dictionary<string, Dictionary<int, string>> Col_strings() {
+        public Dictionary<string, Dictionary<int, string>> Col_strings()
+        {
             var rowStrs = Row_strings();
             var colStrs = new Dictionary<string, Dictionary<int, string>>();
             foreach (var rw in rowStrs.Skip(2))
@@ -584,6 +594,7 @@ namespace DataTableAsync
             set
             {
                 primaryKeys.Clear();
+                Keys.Clear();
                 foreach (Column pk in value)
                     primaryKeys.Add((byte)primaryKeys.Count, pk);
                 // setting keys AFTER rows are loaded
@@ -648,19 +659,18 @@ namespace DataTableAsync
                 if (!tempDict.ContainsKey(castValue))
                 {
                     tempDict[castValue] = new Dictionary<dynamic, dynamic>();
-                    //Debugger.Break();
+                    //if (castValue.ToString() == "897-9120555-0304667") { Debugger.Break(); }
+                    //if (castValue.ToString() == "36" & col.Name == "Page_Nbr") { Debugger.Break(); }
                 }
                 if (col.KeyIndex == (PrimaryKeys.Count() - 1))
                 {
                     tempDict[castValue] = row.Key;
-                    //Debugger.Break();
+                    //if (castValue.ToString() == "36" & col.Name == "Page_Nbr") { Debugger.Break(); }
                 }
                 else {
                     tempDict = tempDict[castValue];
-                    //Debugger.Break();
                 }
             }
-            //Debugger.Break();
         }
 
         #region" ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ N E S T E D   C L A S S E S [ COLUMNS|ROWS ] "
@@ -763,6 +773,7 @@ namespace DataTableAsync
                     return cols.ContainsKey(index) ? cols[index] : default;
                 }
             }
+            public TValue this[Column col]=> col == null ? default : this[col.index];
         }
         public class Column
         {
@@ -901,25 +912,25 @@ namespace DataTableAsync
                             ints.Insert(value, index);
                             foreach (var col in orderedCols)
                                 Table.Columns[col.Name].index = ints.IndexOf(col.Index);
-                            var rows = new List<object[]>();
-                            foreach (var row in Table.Rows.OrderBy(r => r.Key))
-                            {
-                                var cells = new List<object>();
-                                foreach (var cell in row.Value.Cells.OrderBy(c => Table.Columns[c.Key].Index))
-                                    cells.Add(cell.Value);
-                                rows.Add(cells.ToArray());
-                            }
-                            Table.Columns.Clear();
-                            Table.Rows.Clear();
-                            foreach (var col in orderedCols.OrderBy(c => c.Index)) {
-                                var newCol = new Column(col.Name, col.DataType, col.DefaultValue);
-                                Table.Columns.Add(newCol);
-                                if (keyNames.Contains(col.Name))
-                                    pkeys.Add(newCol);
-                            }
-                            foreach (var row in rows)
-                                Table.Rows.Add(row);
-                            Table.PrimaryKeys = pkeys.ToArray();
+                            //var rows = new List<object[]>();
+                            //foreach (var row in Table.Rows.OrderBy(r => r.Key))
+                            //{
+                            //    var cells = new List<object>();
+                            //    foreach (var col in Table.Columns.OrderBy(c => c.Value.Index))
+                            //        cells.Add(row.Value[col.Key]);
+                            //    rows.Add(cells.ToArray());
+                            //}
+                            //Table.Columns.Clear();
+                            //Table.Rows.Clear();
+                            //foreach (var col in orderedCols.OrderBy(c => c.Index)) {
+                            //    var newCol = new Column(col.Name, col.DataType, col.DefaultValue);
+                            //    Table.Columns.Add(newCol);
+                            //    if (keyNames.Contains(col.Name))
+                            //        pkeys.Add(newCol);
+                            //}
+                            //foreach (var row in rows)
+                            //    Table.Rows.Add(row);
+                            //Table.PrimaryKeys = pkeys.ToArray();
                         }
                         index = value;
                     }
