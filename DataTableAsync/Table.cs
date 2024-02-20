@@ -19,10 +19,11 @@ namespace DataTableAsync
 
     public class Table
     {
-        private readonly static CultureInfo enUS = new CultureInfo("en-US", false);
-        private const string dateFormat = "yyyy-MM-dd HH:mm:ss.fff";
-        internal readonly static string[] dateFormats = new string[] { "MM/dd/yyyy", "MM/dd/yy" };
-        internal readonly static NumberStyles numberStyles = NumberStyles.AllowThousands | NumberStyles.AllowDecimalPoint | NumberStyles.AllowCurrencySymbol | NumberStyles.AllowParentheses | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite | NumberStyles.AllowLeadingSign;
+        internal readonly static CultureInfo enUS = new CultureInfo("en-US", false);
+        internal readonly static NumberStyles nbrStyles = NumberStyles.AllowThousands | NumberStyles.AllowDecimalPoint | NumberStyles.AllowCurrencySymbol | NumberStyles.AllowParentheses | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite | NumberStyles.AllowLeadingSign;
+        internal readonly static DateTimeStyles dtStyles = DateTimeStyles.None;
+        internal const string dtFormat = "yyyy-MM-dd HH:mm:ss.fff";
+        internal readonly static string[] dtFormats = new string[] { "MM/dd/yyyy", "MM/dd/yy" };
 
         #region" ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ E V E N T S "
         protected virtual void OnTableCleared(EventType tableEvent) => TableCleared?.Invoke(this, new TableEventArgs(tableEvent));
@@ -499,7 +500,7 @@ namespace DataTableAsync
             else if (objectType == typeof(float) | objectType == typeof(decimal) | objectType == typeof(double))
             {
                 var cellValStr = value.ToString();
-                decimal.TryParse(cellValStr, numberStyles, enUS, out decimal cellVal);
+                decimal.TryParse(cellValStr, nbrStyles, enUS, out decimal cellVal);
                 objStr = cellVal.ToString(objFormat);
             }
             else
@@ -532,7 +533,7 @@ namespace DataTableAsync
                     break;
                 }
             }
-            return allMidnight ? dateFormat.Split(' ')[0] : dateFormat;
+            return allMidnight ? dtFormat.Split(' ')[0] : dtFormat;
         }
         private string ObjectFormat(string colName) {
             
@@ -553,12 +554,12 @@ namespace DataTableAsync
                     {
                         var dates = new List<DateTime>((IEnumerable<DateTime>)dateArray); // DateTime[] | List<DateTime> can be cast as IEnumerable<DateTime>
                         format = DateFormat(dates);
-                        if (format == dateFormat) {
+                        if (format == dtFormat) {
                             allMidnight = false;
                             break;
                         } // if equals long date format
                     }
-                    format = allMidnight ? dateFormat.Split(' ')[0] : dateFormat;
+                    format = allMidnight ? dtFormat.Split(' ')[0] : dtFormat;
                 }
                 else if (col.DataType == typeof(float) | col.DataType == typeof(decimal) | col.DataType == typeof(double))
                 {
@@ -605,7 +606,38 @@ namespace DataTableAsync
         [JsonIgnore]
         public Dictionary<dynamic, dynamic> Keys { get; } = new Dictionary<dynamic, dynamic>();
         internal Dictionary<byte, Column> primaryKeys = new Dictionary<byte, Column>();
-        public Row FindRow(object findValue) => FindRow(new object[] { findValue });
+        public Dictionary<int, Row> FindRows(object findValue) => FindRows(new object[] { findValue });
+        public Dictionary<int, Row> FindRows(object[] findValues)
+        {
+            // work in progress... ex: user provides only the 1st value of 3 primary keys; return all rows that match that layer
+            if (findValues != null)//&& findValues.Length == PrimaryKeys.Length
+            {
+                findValues = findValues.Take(primaryKeys.Count).ToArray(); // you can't search on 5 vaues if there are only 3 primaryKeys
+                Dictionary<dynamic, dynamic> tempDict = Keys;
+                var finds = findValues.Select((val, index) => new { val, index }).ToDictionary(k => (byte)k.index, v => v.val);
+                byte findLvl = 0;
+                int rwIndx = -1;
+                try
+                {
+                    while (tempDict.Values.FirstOrDefault() is IEnumerable)
+                    {
+                        var find = finds[findLvl];
+                        var castValue = SurroundClass.ChangeType(find, primaryKeys[findLvl].DataType);
+                        if (castValue.GetType() == typeof(string))
+                        {
+                            var caseDict = tempDict.ToDictionary(k => (string)k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                            tempDict = caseDict[(string)castValue];
+                        }
+                        else { }
+                    }
+                    Debugger.Break();
+                    return rwIndx == -1 ? null : new Dictionary<int, Row> { { rwIndx, Rows[rwIndx] } };
+                }
+                catch(Exception ex) { Debugger.Break(); Console.WriteLine(ex.Message); return null; }
+            }
+            else
+                return null;
+        }
         public Row FindRow(object[] findValues)
         {
             if (findValues != null && findValues.Length == PrimaryKeys.Length)
@@ -664,7 +696,8 @@ namespace DataTableAsync
                 }
                 if (col.KeyIndex == (PrimaryKeys.Count() - 1))
                 {
-                    tempDict[castValue] = row.Key;
+                    //tempDict[castValue] = row.Key;
+                    tempDict[castValue][row.Key] = row.Value;
                     //if (castValue.ToString() == "36" & col.Name == "Page_Nbr") { Debugger.Break(); }
                 }
                 else {
@@ -961,15 +994,6 @@ namespace DataTableAsync
                 DataType = datatype;
                 DefaultValue = defaultValue;
             }
-            public Row FindRow(dynamic findValue)
-            {
-                if (IsKey)
-                {
-                    try { return Table.FindRow(findValue); }
-                    catch { return null; }
-                }
-                else return null;
-            }
             public override string ToString()
             {
                 string toString = $"[{Index}] {Name} <{DataType.Name}>";
@@ -990,11 +1014,14 @@ namespace DataTableAsync
             public new TValue Add(TKey key, TValue value)
             {
                 // index should always be set by increment and not the user
-                int rowIndex = Table.Rows.Count;
+                var parsedOK = int.TryParse(key.ToString(), nbrStyles, enUS, out int rwIndx);
+                rwIndx = parsedOK ? rwIndx : Count;
                 base.Add(key, value);
-                Row addRow = Table.Rows[rowIndex];
+                Row addRow = Table.Rows[rwIndx];
                 addRow.parent = Table;
-                addRow.index = rowIndex;
+                addRow.index = rwIndx;
+                if (!parsedOK)
+                    Debugger.Break();
                 // can add an existing Row, or a New one
                 bool initialize = addRow.Cells.ContainsKey("→0←");//1st is always 0
                 if (initialize)
@@ -1023,7 +1050,7 @@ namespace DataTableAsync
                     }
                 }
                 if (Table.PrimaryKeys.Any())
-                    Table.AddKeys(new KeyValuePair<int, Row>(rowIndex, addRow));
+                    Table.AddKeys(new KeyValuePair<int, Row>(rwIndx, addRow));
                 Table.OnRowsChanged(EventType.RowAdd, addRow);
                 return value;
             }
@@ -1076,22 +1103,13 @@ namespace DataTableAsync
                 base.Clear();
                 Table.OnRowsChanged(EventType.RowsCleared, null);
             }
-            public Row Find(dynamic value) => Table?.FindRow(value);
         }
         public sealed class Row : IEquatable<Row>
         {
             [JsonIgnore]
             public Table Table { get { return parent; } }
             internal Table parent = null;
-            public int Index
-            {
-                get
-                {
-                    return index;
-                    //if (Table == null) return index;
-                    //else return Table.Rows.Where(r => r.Value == this).FirstOrDefault().Key;
-                }
-            }
+            public int Index => index;
             internal int index;
             public object this[string key]
             {
