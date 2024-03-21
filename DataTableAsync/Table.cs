@@ -219,51 +219,62 @@ namespace DataTableAsync
         {
             if (mergeTable != null)
             {
-                if (!Columns.Any()) foreach (Column column in mergeTable.Columns.Values.OrderBy(c => c.Index))
-                        Columns.Add(new Column(column.Name, column.DataType) { DefaultValue = column.DefaultValue });
-                if (mergeTable.PrimaryKeys.Any()) PrimaryKeys = mergeTable.PrimaryKeys;
-                // mergeTable.Columns count>=this.Columns.Count
+                if (!Columns.Any())
+                    foreach (Column col in mergeTable.Columns.Values.ToList().OrderBy(c => c.Index))
+                        Columns.Add(new Column(col.Name, col.DataType, col.DefaultValue));
+
+                if (mergeTable.PrimaryKeys.Any())
+                    PrimaryKeys = mergeTable.PrimaryKeys;
+                
+                // mergeTable.Columns count >= this.Columns.Count
                 int Columns_sameNameCount = 0;
-                foreach (Column column in mergeTable.Columns.Values)
-                    if (Columns.ContainsKey(column.Name)) Columns_sameNameCount++;
+                foreach (Column col in mergeTable.Columns.Values.ToList())
+                    if (Columns.ContainsKey(col.Name)) Columns_sameNameCount++;
 
                 bool addByName = Columns_sameNameCount >= Columns.Count;
                 bool addByIndex = !addByName;
                 if (addByName)
                 {
-                    foreach (Row mergeRow in mergeTable.Rows.Values)
+                    foreach (Row mergeRow in mergeTable.Rows.Values.ToList())
                     {
                         var rowValues = Columns.ToDictionary(k => k.Key, v => v.Value.DefaultValue, StringComparer.OrdinalIgnoreCase);
-                        foreach (var mergeCell in mergeRow.Cells) { if (rowValues.ContainsKey(mergeCell.Key)) { rowValues[mergeCell.Key] = mergeCell.Value; } }
+                        foreach (var mergeCell in mergeRow.Cells)
+                            if (rowValues.ContainsKey(mergeCell.Key))
+                                rowValues[mergeCell.Key] = mergeCell.Value;
                         Rows.Add(new Row(rowValues.Values, this));
                     }
                 }
                 else if (addByIndex)
-                    foreach (Row mergeRow in mergeTable.Rows.Values) Rows.Add(new Row(mergeRow.Cells.Values, this));
+                    foreach (Row mergeRow in mergeTable.Rows.Values.ToList())
+                        Rows.Add(new Row(mergeRow.Cells.Values, this));
             }
         }
         public void Merge(DataTable mergeTable)
         {
             if (mergeTable != null)
             {
-                if (!Columns.Any()) foreach (DataColumn column in mergeTable.Columns)
-                        Columns.Add(new Column(column.ColumnName, column.DataType));
+                if (!Columns.Any())
+                    foreach (var col in mergeTable.Columns.OfType<DataColumn>().ToList())
+                        Columns.Add(new Column(col.ColumnName, col.DataType, col.DefaultValue));
 
                 // mergeTable.Columns count>=this.Columns.Count
                 // , mergeTable.PrimaryKey.Contains(column)
 
                 int Columns_sameNameCount = 0;
-                foreach (DataColumn column in mergeTable.Columns)
-                    if (Columns.ContainsKey(column.ColumnName)) Columns_sameNameCount++;
+                foreach (var col in mergeTable.Columns.OfType<DataColumn>().ToList())
+                    if (Columns.ContainsKey(col.ColumnName))
+                        Columns_sameNameCount++;
 
                 bool addByName = Columns_sameNameCount >= Columns.Count;
                 bool addByIndex = !addByName;
                 if (addByName)
                 {
-                    foreach (DataRow mergeRow in mergeTable.AsEnumerable())
+                    foreach (DataRow mergeRow in mergeTable.AsEnumerable().ToList())
                     {
                         var rowValues = Columns.ToDictionary(k => k.Key, v => v.Value.DefaultValue, StringComparer.OrdinalIgnoreCase);
-                        foreach (DataColumn column in mergeTable.Columns) { if (rowValues.ContainsKey(column.ColumnName)) { rowValues[column.ColumnName] = mergeRow[column.ColumnName]; } }
+                        foreach (DataColumn column in mergeTable.Columns)
+                            if (rowValues.ContainsKey(column.ColumnName))
+                                rowValues[column.ColumnName] = mergeRow[column.ColumnName];
                         Rows.Add(new Row(rowValues.Values));
                     }
                 }
