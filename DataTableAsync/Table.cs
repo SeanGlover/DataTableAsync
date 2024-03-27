@@ -30,7 +30,6 @@ namespace DataTableAsync
         public event EventHandler<TableEventArgs> TableCleared;
         protected virtual void OnColumnsChanged(EventType columnEvent, Column column) => ColumnsChanged?.Invoke(this, new TableEventArgs(columnEvent, column));
         public event EventHandler<TableEventArgs> ColumnsChanged;
-
         protected virtual void OnRowsChanged(EventType rowEvent, Row row) => RowsChanged?.Invoke(this, new TableEventArgs(rowEvent, row));
         public event EventHandler<TableEventArgs> RowsChanged;
         protected virtual void OnColumnCastFailed(Column column, Type toType) => ColumnCastFailed?.Invoke(this, new TableEventArgs(column, toType));
@@ -1188,11 +1187,12 @@ namespace DataTableAsync
 
             public bool Equals(Row other)
             {
-                if (other is null) return false;
-                var bools = new List<bool>(Cells.Select(c => other.Cells.ContainsKey(c.Key) && other.Cells[c.Key] == c.Value));
-                bools.AddRange(other.Cells.Select(c => Cells.ContainsKey(c.Key) && Cells[c.Key] == c.Value));
-                return !bools.Any(b => !b);
+                if (other is null)
+                    return false;
+                var bools = Cells.Select(c => other.Cells.ContainsKey(c.Key) && (other.Cells[c.Key] ?? "").ToString() == (c.Value ?? "").ToString()).ToList();
+                return !bools.Contains(false);
             }
+            public override bool Equals(object obj) => Equals(obj as Row);
             public override int GetHashCode() {
 
                 int hash = 0;
