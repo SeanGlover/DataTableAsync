@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using System.Globalization;
 using static DataTableAsync.Table;
 using System.Diagnostics;
+using System.Data.Common;
 
 namespace DataTableAsync
 {
@@ -138,15 +139,21 @@ namespace DataTableAsync
                 }
             }
         }
-        public Table(IEnumerable<Row> dataSource)
+        public Table(IEnumerable<Row> dataSource, bool orderByIndex = true)
         {
             Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
-            List<Row> datarows = new List<Row>(dataSource.OfType<Row>());
+            var datarows = dataSource.OfType<Row>().ToList();
             if (datarows.Any()) {
-                List<Column> sourceColumns = new List<Column>(datarows.First().Table.Columns.Values);
-                foreach (Column column in sourceColumns) Columns.Add(column.Name, column.DataType);
-                foreach (Row row in datarows.OrderBy(r => r.Index)) Rows.Add(row);
-                if (Columns.Any()) PrimaryKeys = Columns.First().Value.Table?.PrimaryKeys;
+                var srcColumns = datarows.First().Table.Columns.Values.ToList();
+                foreach (Column col in srcColumns)
+                    Columns.Add(col.Name, col.DataType, col.DefaultValue); // might want to use Reflection Property copier (in columnTree project)
+                if (orderByIndex)
+                    datarows.Sort((r1, r2) => r1.Index.CompareTo(r2.index));
+                foreach (Row row in datarows)
+                    Rows.Add(row.Values.ToArray());
+
+                if (Columns.Any())
+                    PrimaryKeys = Columns.First().Value.Table?.PrimaryKeys;
             }
         }
         private void DataTable_toTable(DataTable sourceTable, string primaryKey = null)
@@ -955,6 +962,7 @@ namespace DataTableAsync
                             ints.Insert(value, index);
                             foreach (var col in orderedCols)
                                 Table.Columns[col.Name].index = ints.IndexOf(col.Index);
+                            Table.OnColumnsChanged(EventType.ColumnIndexChange, Table.Columns[index]);
                             //var rows = new List<object[]>();
                             //foreach (var row in Table.Rows.OrderBy(r => r.Key))
                             //{
@@ -1268,7 +1276,7 @@ namespace DataTableAsync
     }
 
     #region " ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ S U P P O R T I N G   C L A S S E S ,  S T R U C T U R E S ,  E N U M S "
-    public enum EventType { none, TableCleared, RowsCleared, RowAdd, RowAddFail, RowRemove, CellChange, ColumnsCleared, ColumnAdd, ColumnCastFail, ColumnRemove }
+    public enum EventType { none, TableCleared, RowsCleared, RowAdd, RowAddFail, RowRemove, CellChange, ColumnsCleared, ColumnAdd, ColumnCastFail, ColumnRemove, ColumnIndexChange }
     public class TableEventArgs : EventArgs
     {
         public Column Column;
