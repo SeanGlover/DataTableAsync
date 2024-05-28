@@ -144,13 +144,13 @@ namespace DataTableAsync
             Columns = new ColumnCollection<string, Column>(this); Rows = new RowCollection<int, Row>(this);
             var datarows = dataSource.OfType<Row>().ToList();
             if (datarows.Any()) {
-                var srcColumns = datarows.First().Table.Columns.Values.ToList();
-                foreach (Column col in srcColumns)
+                var srcColumns = datarows.First().Table.Columns.Values.OrderBy(c => c.Index).ToDictionary(k => k.Name, v => v);
+                foreach (Column col in srcColumns.Values)
                     Columns.Add(col.Name, col.DataType, col.DefaultValue); // might want to use Reflection Property copier (in columnTree project)
                 if (orderByIndex)
                     datarows.Sort((r1, r2) => r1.Index.CompareTo(r2.index));
                 foreach (Row row in datarows)
-                    Rows.Add(row.Values.ToArray());
+                    Rows.Add(row.Cells.OrderBy(c => srcColumns[c.Key].Index).Select(c => c.Value));
 
                 if (Columns.Any())
                     PrimaryKeys = Columns.First().Value.Table?.PrimaryKeys;
@@ -857,6 +857,7 @@ namespace DataTableAsync
             }
             private readonly Type[] numbers = new Type[] { typeof(byte), typeof(byte), typeof(sbyte), typeof(short), typeof(ushort), typeof(int), typeof(uint), typeof(long), typeof(ulong), typeof(float), typeof(double), typeof(decimal) };
             private Type datatype;
+            public Type RecommendedType => SurroundClass.GetDataType(Values.Values);
             public object DefaultValue
             {
                 get
@@ -1179,7 +1180,11 @@ namespace DataTableAsync
                     {
                         Dictionary<int, Column> cols = parent.Columns.Values.ToDictionary(k => k.Index, v => v);
                         for (int colIndex = 0; colIndex < (new int[] { cellValues.Count, parent.Columns.Count }).Min(); colIndex++)
-                            Cells.Add(cols[colIndex].Name, cellValues[columnIndex++]);
+                        {
+                            var col = cols[colIndex];
+                            var cellVal = cellValues[columnIndex++];
+                            Cells.Add(col.Name, SurroundClass.ChangeType(cellVal, col.DataType));
+                        }
                     }
                     else
                         foreach (object cellValue in values) Cells.Add($"→{columnIndex++}←", cellValue);
@@ -1534,7 +1539,7 @@ namespace DataTableAsync
                     return null;
             }
         }
-        public static Type GetDataType(object[] objects)
+        public static Type GetDataType(IEnumerable<object> objects)
         {
             if (objects == null)
                 return typeof(string);
