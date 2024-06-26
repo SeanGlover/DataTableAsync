@@ -456,17 +456,23 @@ namespace DataTableAsync
                     string cellString = string.Empty;
                     if (!(cellValue == null | cellValue == DBNull.Value))
                     {
-                        var enumerable = cellValue as IEnumerable;
-                        if (col.DataType != typeof(string) & enumerable != null)
+                        var colTypeIsEnumerable = col.DataType != typeof(string) & col.DataType.GetInterfaces().Any(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+                        if (colTypeIsEnumerable)
                         {
-                            var objStrings = new List<string>();
-                            foreach (var item in enumerable)
+                            if (cellValue is IEnumerable enumerable)
                             {
-                                var objType = item.GetType();
-                                var obStr = ObjectToString(objType, item, objFormat);
-                                objStrings.Add(obStr);
-                            }                                
-                            cellString = string.Join(col.DataType.ToString().ToLower().Contains("char") ? "" : "•", objStrings);
+                                var objStrings = new List<string>();
+                                foreach (var item in enumerable)
+                                {
+                                    var objType = item.GetType();
+                                    var obStr = ObjectToString(objType, item, objFormat);
+                                    objStrings.Add(obStr);
+                                }
+                                if (col.DataType == typeof(char) | col.DataType == typeof(string)) { }
+                                cellString = string.Join(col.DataType.ToString().ToLower().Contains("char") ? "" : "•", objStrings);
+                            }
+                            else
+                                cellString = ObjectToString(col.DataType, cellValue, objFormat);
                         }
                         else
                             cellString = ObjectToString(col.DataType, cellValue, objFormat);
@@ -1357,9 +1363,13 @@ namespace DataTableAsync
     {
         public static object ChangeType(object value, Type type)
         {
-            if (value == null && type.IsGenericType) return Activator.CreateInstance(type);
-            if (value == null) return null;
-            if (type == value.GetType()) return value;
+            if (value == null || value == DBNull.Value || value.ToString().Length == 0 )
+            {
+                try { return Activator.CreateInstance(type); }
+                catch { return null; }
+            }
+            if (type == value.GetType())
+                return value;
             if (type.IsEnum)
             {
                 if (value is string)
@@ -1373,19 +1383,21 @@ namespace DataTableAsync
                 object innerValue = ChangeType(value, innerType);
                 return Activator.CreateInstance(type, new object[] { innerValue });
             }
-            if (value is string && type == typeof(Guid)) return new Guid(value as string);
-            if (value is string && type == typeof(Version)) return new Version(value as string);
-            if (!(value is IConvertible)) return value;
+            if (value is string && type == typeof(Guid))
+                return new Guid(value as string);
+            if (value is string && type == typeof(Version))
+                return new Version(value as string);
+            if (!(value is IConvertible))
+                return value;
             try { return Convert.ChangeType(value, type); }
             catch { return null; }
         }
         public static Tuple<Type, object> GetDataType(string value)
         {
-            if (value == null) {
+            if (value == null)
                 return Tuple.Create(typeof(string), (object)value);
-            }
 
-            else if (decimal.TryParse(value, out decimal _Decimal))
+            else if (double.TryParse(value, out double _double))
             {
                 // REM /// NUMERIC+COULD BE DECIMAL Or INTEGER
                 if (value.Split('.').Length == 1)
@@ -1415,7 +1427,7 @@ namespace DataTableAsync
                 }
                 else
                     // REM /// DECIMAL
-                    return Tuple.Create(typeof(decimal), (object)_Decimal);
+                    return Tuple.Create(typeof(double), (object)_double);
             }
             else
             {
@@ -1464,91 +1476,119 @@ namespace DataTableAsync
         public static Type GetDataType(IEnumerable<Type> types)
         {
             if (types == null)
-                return null;
-            else
+                return typeof(string); // prefer string as default since every type class has a ToString() override
+
+            // there is a list, but all members are null?
+            var typesDistinct = types.Where(t => t != null).Distinct().ToList();
+            if (typesDistinct.Count == 0)
+                return typeof(string);
+
+            // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ only 1 type
+            if (typesDistinct.Count == 1)
+                return typesDistinct[0];
+
+            // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ a mix of types
+            if (typesDistinct.Contains(typeof(object)))
+                return typeof(object);
+            // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ test incompatible types: object must be returned, ex: DateTime + int
+            var typeDict = new Dictionary<Type, byte>
             {
-                List<Type> distincttypes = types.Where(t => t != null).Distinct().ToList();
-                if (distincttypes.Any())
+                { typeof(byte), 1 },
+                { typeof(sbyte), 1 },
+                { typeof(short), 1 },
+                { typeof(ushort), 1 },
+                { typeof(int), 1 },
+                { typeof(uint), 1 },
+                { typeof(long), 1 },
+                { typeof(ulong), 1 },
+                { typeof(float), 1 },
+                { typeof(double), 1 },
+                { typeof(decimal), 1 },
+                { typeof(char), 2 },
+                { typeof(string), 2 },
+                { typeof(bool), 3 },
+                { typeof(DateTime), 4 },
+                { typeof(Bitmap), 5 },
+                { typeof(Image), 5 },
+                { typeof(Icon), 6 },
+                { typeof(object), 99 }
+            }; // grouping .net types by a value so that if distinct multiple values, the types are then incompatible and must be an object
+            var typeGrps = typesDistinct.Select(t => typeDict.ContainsKey(t) ? typeDict[t] : 0).Distinct().ToList();
+            if (typeGrps.Count > 1)
+                return typeof(object);
+            // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ test compatible types: numeric, string, image
+            // here, only 1 typegrp BUT a best-choice must be taken for groups where there are multiple types such as byte, int or image and bitmap
+            // ... however those with only 1 type in the group, like DateTime should NOT be here since the above logic would have removed them from consideration 
+            var typeGrp = typeGrps[0];
+            if (typeGrp == 1)
+            {
+                var wholes = new Type[]
                 {
-                    int typeCount = distincttypes.Count;
-                    if (typeCount == 1)
-                        // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■  ONLY 1 TYPE, RETURN IT
-                        return distincttypes.First();
+                    typeof(byte),
+                    typeof(sbyte),
+                    typeof(short),
+                    typeof(ushort),
+                    typeof(int),
+                    typeof(uint),
+                    typeof(long),
+                    typeof(ulong)
+                };
+                var fractionals = new Type[]
+                {
+                    typeof(float),
+                    typeof(double),
+                    typeof(decimal)
+                };
+                var numeric = fractionals.Union(wholes);
+
+                // all whole? return the largest type
+                if (wholes.Intersect(typesDistinct).Count() == typesDistinct.Count())
+                {
+                    if (typesDistinct.Contains(typeof(long)))
+                        return typeof(long);
+                    else if (typesDistinct.Contains(typeof(int)))
+                        return typeof(int);
+                    else if (typesDistinct.Contains(typeof(short)))
+                        return typeof(short);
                     else
-                    {
-                        // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■  MULTIPLE TYPES - CHOOSE BEST FIT ex) Date + DateAndTime = DateAndTime, Byte + Short = Short
-                        if (distincttypes.Intersect(new Type[]
-                        {
-                            typeof(DateTime),
-                        }).Count() == typeCount)
-                            return typeof(DateTime);
-                        else
-                    // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■  NUMERIC
-                    if (distincttypes.Intersect(new Type[]
-                    {
-                        typeof(byte),
-                        typeof(short),
-                        typeof(int),
-                        typeof(long),
-                        typeof(double),
-                        typeof(decimal)
-                    }).Count() == typeCount)
-                        {
-                            if (distincttypes.Intersect(new Type[]
-                            {
-                                typeof(byte),
-                                typeof(short),
-                                typeof(int),
-                                typeof(long)
-                            }).Count() == typeCount)
-                            {
-                                // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■  MIX OF INTEGER ... DESCEND IN SIZE TO GET LARGEST NECESSARY
-                                if (distincttypes.Contains(typeof(long)))
-                                    return typeof(long);
-
-                                else if (distincttypes.Contains(typeof(int)))
-                                    return typeof(int);
-
-                                else if (distincttypes.Contains(typeof(short)))
-                                    return typeof(short);
-
-                                else
-                                    return typeof(byte);
-                            }
-                            else
-                                // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■  COULD BE MIX OF INTEGER, DECIMAL, DOUBLE
-                                return typeof(double);
-                        }
-                        else if (distincttypes.Intersect(new Type[] { typeof(Image), typeof(Bitmap) }).Count() == typeCount)
-                            // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■  IMAGE / BITMAP
-                            return typeof(Bitmap);
-                        else if (distincttypes.Intersect(new Type[]
-                        {
-                    typeof(Image),
-                    typeof(Bitmap),
-                    typeof(Icon)
-                        }).Any())
-                            // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■  IMAGES DON'T MIX WITH OTHER VALUES AS THEY CAN'T REPRESENTED IN A TEXT FORM
-                            return typeof(object);
-                        else
-                            // ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■  STRING AS DEFAULT
-                            return typeof(string);
-                    }
+                        return typeof(byte);
                 }
-                else
-                    return null;
-            }
+                // all fractional? return double
+                if (fractionals.Intersect(typesDistinct).Count() == typesDistinct.Count())
+                    return typeof(double); // double, float, decimal
+
+                // all numeric (mix of whole and fractional)? return double
+                if (numeric.Count() == typesDistinct.Count())
+                    return typeof(double); // double, float, decimal
+            } // 1 == numeric
+            else if (typeGrp == 2)
+                return typeof(string); // 2 == char, string
+            else if (typeGrp == 5)
+                return typeof(Bitmap); // 5 == bitmap, image
+
+            return typeof(object);
         }
-        public static Type GetDataType(IEnumerable<object> objects)
+        public static Type GetDataType(IEnumerable<object> objects, bool stopMe = false)
         {
             if (objects == null)
                 return typeof(string);
             else
             {
                 var nonNullTypes = new List<Type>();
-                foreach(object obj in objects)
-                    if(DBNull.Value != obj && obj !=null)
-                        nonNullTypes.Add(GetDataType(obj.ToString()).Item1);
+                var typeDict = new Dictionary<Type, List<string>>();
+                foreach (object obj in objects)
+                    if (DBNull.Value != obj && obj != null)
+                    {
+                        var typeVal = GetDataType(obj.ToString());
+                        if (!typeDict.ContainsKey(typeVal.Item1))
+                            typeDict[typeVal.Item1] = new List<string>();
+                        var objStr = obj.ToString();
+                        typeDict[typeVal.Item1].Add(objStr);
+                        if (objStr.Length > 0)
+                            nonNullTypes.Add(typeVal.Item1);
+                    }
+                if(stopMe)
+                    Debugger.Break();
                 return GetDataType(nonNullTypes);
             }
         }
