@@ -332,7 +332,7 @@ namespace DataTableAsync
             get
             {
                 var table = this;
-                if (table == null) { return null; }
+                if (table == null) return null;
                 else
                 {
                     Color hdrBackColor = Color.FromArgb(103, 71, 205);
@@ -696,7 +696,8 @@ namespace DataTableAsync
             else
                 return null;
         }
-        public Row NewRow() {
+        public Row NewRow()
+        {
             object nullObj = null;
             var nulls = Enumerable.Range(0, Columns.Count).Select(n => nullObj);
             var newRow = new Row(nulls, this);
@@ -743,7 +744,8 @@ namespace DataTableAsync
                 Column addColumn = Table.Columns[key.ToString()];
                 addColumn.Index = Table.Columns.Count - 1;
                 addColumn.parent = Table;
-                foreach (Row row in Table.Rows.Values) { row.Cells.Add(addColumn.Name, addColumn.DefaultValue); }
+                foreach (Row row in Table.Rows.Values)
+                    row.Cells.Add(addColumn.Name, addColumn.DefaultValue);
                 Table.OnColumnsChanged(EventType.ColumnAdd, addColumn);
                 return value;
             }
@@ -761,7 +763,7 @@ namespace DataTableAsync
             }
             public Column Add(string columnName, Type columnType, object defaultValue)
             {
-                var addColumn = new Column(columnName, columnType) { DefaultValue = defaultValue };
+                var addColumn = new Column(columnName, columnType, defaultValue);
                 Table.Columns.Add(columnName, addColumn);
                 return Table.Columns[addColumn.Name];
             }
@@ -868,16 +870,13 @@ namespace DataTableAsync
             {
                 get
                 {
-                    if (defaultValue == null)
+                    // if the default value is not set, then help determine the cell value
+                    // but if it was set ( successful or not ) use the successful value -OR- null
+                    if (setDefault & defaultValue == null)
                     {
-                        if (numbers.Contains(datatype))
-                            return 0;
-                        else if (datatype == typeof(DateTime))
-                            return DateTime.MinValue;
-                        else if (datatype == typeof(bool))
-                            return false;
-                        else if (datatype == typeof(string))
+                        if (datatype == typeof(string))
                             return AllowNulls ? null : string.Empty;
+                        return SurroundClass.ChangeType(null, datatype);
                     }
                     return defaultValue;
                 }
@@ -885,15 +884,17 @@ namespace DataTableAsync
                 {
                     if (defaultValue != value)
                     {
-                        if (SurroundClass.Cast(DataType, value))
-                        {
+                        setDefault = false;
+                        //var compatibleVal = SurroundClass.Cast(DataType, value);
+                        var changeVal = SurroundClass.ChangeType(value, datatype);
+                        if (changeVal != null)
                             defaultValue = value;
-                            AwaitTask();
-                        }
+                        AwaitTask();
                     }
                 }
             }
             private object defaultValue = null;
+            private bool setDefault = true;
             public bool AllowNulls { get; set; }
             private async void AwaitTask()
             {
@@ -1189,7 +1190,7 @@ namespace DataTableAsync
                         {
                             var col = cols[colIndex];
                             var cellVal = cellValues[columnIndex++];
-                            Cells.Add(col.Name, SurroundClass.ChangeType(cellVal, col.DataType));
+                            Cells.Add(col.Name, cellVal ?? col.DefaultValue); // SurroundClass.ChangeType(cellVal, col.DataType)
                         }
                     }
                     else
@@ -1310,7 +1311,7 @@ namespace DataTableAsync
         }
         public override string ToString()
         {
-            if (TableAction == EventType.ColumnsCleared | TableAction == EventType.RowsCleared) { return TableAction.ToString(); }
+            if (TableAction == EventType.ColumnsCleared | TableAction == EventType.RowsCleared) return TableAction.ToString();
             else
             {
                 List<string> strings = new List<string>();
@@ -1327,7 +1328,7 @@ namespace DataTableAsync
         public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer) => throw new NotImplementedException("Not implemented yet");
         public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
         {
-            if (reader.TokenType == JsonToken.Null) { return string.Empty; }
+            if (reader.TokenType == JsonToken.Null) return string.Empty;
             else if (reader.TokenType == JsonToken.String)
             {
                 object jsonObject = serializer.Deserialize(reader, objectType);
@@ -1594,40 +1595,39 @@ namespace DataTableAsync
         }
         public static bool Cast(Type tryType, object value)
         {
-            if (value == null) { return true; }
-            else if (tryType == typeof(char)) { return value.GetType() == typeof(char); }
-            else if (tryType == typeof(string)) { return value.GetType() == typeof(string); }
-            else if (tryType == typeof(Bitmap)) { return value.GetType() == typeof(System.Drawing.Image) | value.GetType() == typeof(Bitmap); }
+            if (value == null) return true;
+            else if (tryType == typeof(char)) return value.GetType() == typeof(char);
+            else if (tryType == typeof(string)) return value.GetType() == typeof(string);
+            else if (tryType == typeof(Bitmap)) return value.GetType() == typeof(System.Drawing.Image) | value.GetType() == typeof(Bitmap);
             else if (tryType == typeof(bool))
-            {
-                // something here with 0 | 1
-                return value.GetType() == typeof(bool) | new string[] { "true", "false" }.Contains(value.ToString().ToLowerInvariant());
-            }
+            return value.GetType() == typeof(bool) | new string[] { "true", "false" }.Contains(value.ToString().ToLowerInvariant());
             else if (tryType == typeof(DateTime))
-            {
-                // something here with cultureinfo
-                return value.GetType() == typeof(DateTime);
-            }
+            return value.GetType() == typeof(DateTime);
             else
             {
-                string valueString = value.ToString().ToLowerInvariant();
-                if (valueString.All(char.IsNumber))
-                {
-                    if (tryType == typeof(double)) { return double.TryParse(valueString, out double result); }
-                    else if (tryType == typeof(decimal)) { return decimal.TryParse(valueString, out decimal result); }
-                    else if (tryType == typeof(long)) { return long.TryParse(valueString, out long result); }
-                    else if (tryType == typeof(ulong)) { return ulong.TryParse(valueString, out ulong result); }
-                    else if (tryType == typeof(int)) { return int.TryParse(valueString, out int result); }
-                    else if (tryType == typeof(float)) { return float.TryParse(valueString, out float result); }
-                    else if (tryType == typeof(short)) { return short.TryParse(valueString, out short result); }
-                    else if (tryType == typeof(ushort)) { return ushort.TryParse(valueString, out ushort result); }
-                    else if (tryType == typeof(sbyte)) { return sbyte.TryParse(valueString, out sbyte result); }
-                    else if (tryType == typeof(byte)) { return byte.TryParse(valueString, out byte result); }
-                    //else if (tryType == typeof(nuint)) { return nuint.TryParse(valueString, out nuint result); }
-                    //else if (tryType == typeof(nint)) { return nint.TryParse(valueString, out nint result); }
-                    else { return false; }
-                }
-                else { return false; }
+                string valStr = value.ToString().ToLowerInvariant();
+                if (tryType == typeof(double))
+                    return double.TryParse(valStr, out double result);
+                else if (tryType == typeof(decimal))
+                    return decimal.TryParse(valStr, out decimal result);
+                else if (tryType == typeof(long))
+                    return long.TryParse(valStr, out long result);
+                else if (tryType == typeof(ulong))
+                    return ulong.TryParse(valStr, out ulong result);
+                else if (tryType == typeof(int))
+                    return int.TryParse(valStr, out int result);
+                else if (tryType == typeof(float))
+                    return float.TryParse(valStr, out float result);
+                else if (tryType == typeof(short))
+                    return short.TryParse(valStr, out short result);
+                else if (tryType == typeof(ushort))
+                    return ushort.TryParse(valStr, out ushort result);
+                else if (tryType == typeof(sbyte))
+                    return sbyte.TryParse(valStr, out sbyte result);
+                else if (tryType == typeof(byte))
+                    return byte.TryParse(valStr, out byte result);
+                else
+                    return false;
             }
         }
         private static List<string> EnumNames(Type enumType) => Enum.GetNames(enumType).ToList();
