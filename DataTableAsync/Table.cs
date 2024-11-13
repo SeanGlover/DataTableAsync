@@ -515,7 +515,7 @@ namespace DataTableAsync
             }
             return rowStrs;
         }
-        private static string ObjectToString(Type objectType, object value, string objFormat)
+        public static string ObjectToString(Type objectType, object value, string objFormat)
         {
             string objStr;
             if (objectType == typeof(DateTime))
@@ -558,8 +558,8 @@ namespace DataTableAsync
             }
             return allMidnight ? dtFormat.Split(' ')[0] : dtFormat;
         }
-        private string ObjectFormat(string colName) {
-            
+        public string ObjectFormat(string colName)
+        {
             var format = string.Empty;
             if (Columns.ContainsKey(colName))
             {
@@ -700,7 +700,7 @@ namespace DataTableAsync
         {
             object nullObj = null;
             var nulls = Enumerable.Range(0, Columns.Count).Select(n => nullObj);
-            var newRow = new Row(nulls, this);
+            var newRow = new Row(nulls, this, false);
             Rows.Add(newRow);
             return newRow;
         }
@@ -1014,11 +1014,11 @@ namespace DataTableAsync
                 Name = name;
                 DataType = datatype;
             }
-            public Column(string name, Type datatype, object defaultValue)
+            public Column(string name, Type datatype, object defaultVal)
             {
                 Name = name;
                 DataType = datatype;
-                DefaultValue = defaultValue;
+                defaultValue = defaultVal; setDefault = false;
             }
             public override string ToString()
             {
@@ -1171,30 +1171,30 @@ namespace DataTableAsync
                 int columnIndex = 0;
                 foreach (object cellValue in values) Cells.Add($"→{columnIndex++}←", cellValue);
             }
-            public Row(IEnumerable values, Table parent = null)
+            public Row(IEnumerable values, Table parent = null, bool stopMe = false)
             {
                 Cells = new CellCollection<string, object>(this);
                 // if a Row is instantiated without a Parent(table) then the Cells.Keys will not be a column name, but →0←, →1←, →2←,... →n←
                 if (values != null)
                 {
                     this.parent = parent;
-                    Dictionary<int, object> cellValues = new Dictionary<int, object>();
+                    var cellValues = new Dictionary<int, object>();
                     int valueIndex = 0;
                     foreach (object cellValue in values)
                         cellValues.Add(valueIndex++, cellValue);
-                    int columnIndex = 0;
                     if (parent != null)
                     {
-                        Dictionary<int, Column> cols = parent.Columns.Values.ToDictionary(k => k.Index, v => v);
-                        for (int colIndex = 0; colIndex < (new int[] { cellValues.Count, parent.Columns.Count }).Min(); colIndex++)
-                        {
-                            var col = cols[colIndex];
-                            var cellVal = cellValues[columnIndex++];
-                            Cells.Add(col.Name, cellVal ?? col.DefaultValue); // SurroundClass.ChangeType(cellVal, col.DataType)
-                        }
+                        foreach (var col in parent.Columns.Values)
+                            Cells[col.Name] = cellValues[col.Index] ?? col.DefaultValue; // SurroundClass.ChangeType(cellVal, col.DataType)
+                        if (stopMe)
+                            Debugger.Break();
                     }
                     else
-                        foreach (object cellValue in values) Cells.Add($"→{columnIndex++}←", cellValue);
+                    {
+                        int columnIndex = 0;
+                        foreach (object cellValue in values)
+                            Cells[$"→{columnIndex++}←"] = cellValue;
+                    }
                 }
             }
             [JsonIgnore]
