@@ -666,32 +666,43 @@ namespace DataTableAsync
             if (findValues != null && findValues.Length == PrimaryKeys.Length)
             {
                 Dictionary<dynamic, dynamic> tempDict = Keys;
-                byte keyIndex = 0;
-                int rowIndex = -1;
-                try
+                byte indxKey = 0;
+                int indxRw = -1;
+
+                foreach (var findValue in findValues)
                 {
-                    foreach (var findValue in findValues)
+                    var castValue = SurroundClass.ChangeType(findValue, primaryKeys[indxKey++].DataType);
+                    if (castValue.GetType() == typeof(string))
                     {
-                        var castValue = SurroundClass.ChangeType(findValue, primaryKeys[keyIndex++].DataType);
-                        if (castValue.GetType() == typeof(string))
+                        var caseDict = tempDict.ToDictionary(k => (string)k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                        if (indxKey == PrimaryKeys.Length)
+                            indxRw = caseDict[(string)castValue];
+                        else
+                            tempDict = caseDict[(string)castValue];
+                    }
+                    else
+                    {
+                        if (indxKey == PrimaryKeys.Length)
                         {
-                            var caseDict = tempDict.ToDictionary(k => (string)k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
-                            if (keyIndex == PrimaryKeys.Length)
-                                rowIndex = caseDict[(string)castValue];
-                            else
-                                tempDict = caseDict[(string)castValue];
+                            var dictObjObj = (Dictionary<object, object>)tempDict[castValue];
+                            if (dictObjObj.Any())
+                                indxRw = ((Row)dictObjObj.Values.First()).index;
                         }
                         else
-                        {
-                            if (keyIndex == PrimaryKeys.Length)
-                                rowIndex = tempDict[castValue];
-                            else
-                                tempDict = tempDict[castValue];
-                        }
+                            tempDict = tempDict[castValue];
                     }
-                    return rowIndex == -1 ? null : Rows[rowIndex];
                 }
-                catch { return null; }
+                return indxRw == -1 ? null : Rows[indxRw];
+                try
+                {
+
+                }
+                catch(Exception ex)
+                {
+                    Console.WriteLine(ex);
+                    Debugger.Break();
+                    return null;
+                }
             }
             else
                 return null;
